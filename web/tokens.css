@@ -1,0 +1,12 @@
+/* Design tokens shared by the guest website (/) and the staff app (/staff).
+   The palette, fonts and spacing live here only: change a value once and both sites follow. */
+:root {
+  --bg: #fbf6ea; --surface: #fffdf8; --text: #2b1d16; --muted: #6a5646; --border: #e3d5b8;
+  --maroon: #6b1d1d; --maroon-dark: #521212; --saffron: #e8870e; --focus: #a34f00; --on-dark: #fbf1dc;
+  --danger: #9b1c1c; --ok: #1d6b35;
+  --on-saffron: #2b1400; /* text on saffron: white would fail contrast, so saffron buttons use this dark brown */
+  --font-serif: Georgia, "Times New Roman", serif;
+  --font-sans: system-ui, "Segoe UI", sans-serif;
+  --s1: .25rem; --s2: .5rem; --s3: .75rem; --s4: 1rem; --s6: 1.5rem; --s8: 2rem; --s12: 3rem; --s16: 4rem; --s24: 6rem;
+  --r: 8px;
+}

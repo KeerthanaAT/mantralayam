@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stay at Mantralayam · Book a Room</title>
+<meta name="description" content="Book a room at pilgrim guest houses, choultries and cottages near Sri Raghavendra Swamy Mutt, Mantralayam.">
+<link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/shared.css">
+<style>
+  .wrap { max-width: 64rem; margin: 0 auto; padding: 0 var(--s4); }
+  .hero { background: var(--maroon); color: var(--on-dark); border-bottom: 4px solid var(--saffron); padding: var(--s8) 0 5.5rem; }
+  .hero h1 { color: var(--on-dark); font-size: clamp(1.6rem, 6vw, 2.5rem); max-width: 36rem; }
+  .hero p { margin-top: var(--s3); max-width: 38rem; color: #f0dfc2; font-size: 1.05rem; }
+  .eyebrow { text-transform: uppercase; letter-spacing: .1em; font-size: .8rem; color: #f5b45a; margin-bottom: var(--s2); }
+  main { padding-bottom: 4rem; }
+  #view > h1 { margin-top: var(--s6); }
+  main > .wrap > * + * { margin-top: var(--s8); }
+  .search { margin-top: -3.5rem; position: relative; display: grid; gap: var(--s3); grid-template-columns: 1fr; padding: var(--s4); border-top: 4px solid var(--saffron); }
+  @media (min-width: 560px) { .search { grid-template-columns: 1fr 1fr; } }
+  @media (min-width: 900px) { .search { grid-template-columns: repeat(3, 1fr); padding: var(--s6); } }
+  .search .btn, .search .span { grid-column: 1 / -1; }
+  .search .btn { min-height: 3.25rem; font-size: 1.05rem; }
+  .stay { font-weight: 600; color: var(--maroon); }
+  section > h2 { margin-bottom: var(--s3); font-size: 1.4rem; }
+  .prop { margin-top: var(--s6); }
+  .prop h3 { font-size: 1.25rem; }
+  .types { display: grid; gap: var(--s4); grid-template-columns: 1fr; margin-top: var(--s3); list-style: none; padding: 0; }
+  @media (min-width: 700px) { .types { grid-template-columns: 1fr 1fr; } }
+  .rt { display: flex; flex-direction: column; gap: var(--s3); }
+  .rt h4 { font: 700 1.1rem Georgia, serif; color: var(--maroon); margin: 0; }
+  .chips { display: flex; flex-wrap: wrap; gap: var(--s2); list-style: none; margin: 0; padding: 0; }
+  .chips li { font-size: .82rem; padding: .1rem .6rem; border: 1px solid var(--border); border-radius: 999px; background: #fff; }
+  .price { font: 700 1.5rem Georgia, serif; color: var(--text); line-height: 1.1; }
+  .rt .foot { margin-top: auto; display: grid; gap: var(--s3); }
+  .rt .btn { width: 100%; min-height: 3rem; }
+  .photo { aspect-ratio: 16 / 9; background: #f3e6c8; display: grid; place-items: center; border-radius: var(--r) var(--r) 0 0; position: relative; }
+  .photo svg { width: 38%; opacity: .55; }
+  .photo span { position: absolute; bottom: var(--s2); right: var(--s3); font-size: .75rem; color: var(--muted); }
+  .props { display: grid; gap: var(--s4); grid-template-columns: 1fr; list-style: none; padding: 0; margin: 0; }
+  @media (min-width: 700px) { .props { grid-template-columns: 1fr 1fr; } }
+  @media (min-width: 1000px) { .props { grid-template-columns: repeat(3, 1fr); } }
+  .pcard { padding: 0; overflow: hidden; display: flex; flex-direction: column; height: 100%; }
+  .pcard .body { padding: var(--s4); display: flex; flex-direction: column; gap: var(--s2); flex: 1; }
+  .pcard .btn { margin-top: auto; }
+  .info { display: grid; gap: var(--s4); grid-template-columns: 1fr; }
+  @media (min-width: 700px) { .info { grid-template-columns: repeat(3, 1fr); } }
+  .info h3 { margin-bottom: var(--s1); }
+  dl.facts { display: grid; grid-template-columns: auto 1fr; gap: var(--s2) var(--s4); margin: 0; }
+  dl.facts dt { color: var(--muted); } dl.facts dd { margin: 0; font-weight: 600; text-align: right; }
+  .total dd, .total dt { font-size: 1.15rem; color: var(--maroon); }
+  .conf { border-top: 6px solid var(--ok); display: grid; gap: var(--s4); }
+  .conf .id { font: 700 2.4rem/1.1 Georgia, serif; color: var(--maroon); }
+  .conf .grid2 { display: grid; gap: var(--s4); grid-template-columns: 1fr; }
+  @media (min-width: 700px) { .conf .grid2 { grid-template-columns: 1fr 1fr; } }
+  .conf.cancelled { border-top-color: var(--muted); }
+  .actions { display: flex; flex-wrap: wrap; gap: var(--s3); }
+  .lookup { display: grid; gap: var(--s3); grid-template-columns: 1fr; max-width: 34rem; }
+  .summary { border: 1px solid var(--border); border-radius: var(--r); padding: var(--s3) var(--s4); background: #fff; }
+  .summary dl { margin: 0; }
+  footer { background: var(--maroon-dark); color: #dccdb0; padding: var(--s6) 0; font-size: .9rem; }
+  footer a { color: #f5d9a8; }
+  @media print {
+    header.top, footer, .hero, .noprint, #toast, .skip { display: none !important; }
+    body { background: #fff; } .card { border: 1px solid #999; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#view">Skip to content</a>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<header class="top">
+  <div class="bar">
+    <a class="brand" href="#/" style="color:inherit;text-decoration:none" aria-label="Mantralayam Rooms, home">
+      <svg viewBox="0 0 40 40" aria-hidden="true" focusable="false"><path d="M20 3l4 5h-8zM13 8h14l3 6H10zM9 14h22l3 7H6zM5 21h30v3H5zM8 24h24v12H8z" fill="#e8870e"/><path d="M17 36v-8h6v8" fill="#521212"/></svg>
+      <div>Mantralayam Rooms<small>Pilgrim accommodation</small></div>
+    </a>
+    <button class="btn" id="menu-btn" aria-expanded="false" aria-controls="nav">Menu</button>
+    <nav class="main" id="nav" aria-label="Main">
+      <ul>
+        <li><a href="#/" data-r="home">Book a room</a></li>
+        <li><a href="#/booking" data-r="booking">My booking</a></li>
+        <li><a href="/staff">Staff login</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<div class="hero" id="hero">
+  <div class="wrap">
+    <p class="eyebrow">Sri Raghavendra Swamy Mutt · Mantralayam</p>
+    <h1>Comfortable rooms for pilgrims, close to the Mutt</h1>
+    <p>Guest houses, choultries and cottages for families and groups. Choose your dates, pick a room, and pay at the counter when you arrive.</p>
+  </div>
+</div>
+
+<main>
+  <div class="wrap" id="view" tabindex="-1"></div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Bookings are held in your name and paid at the property counter on arrival. Please carry the ID proof you entered while booking.</p>
+    <p style="margin-top:.5rem">Need help? Call the property you booked, or <a href="#/booking">look up your booking</a>. · <a href="/staff">Staff login</a></p>
+  </div>
+</footer>
+
+<dialog id="bdlg" aria-labelledby="bdlg-h">
+  <form id="bform">
+    <h2 id="bdlg-h">Confirm your booking</h2>
+    <div class="summary"><dl class="facts" id="bsum"></dl></div>
+    <div class="row">
+      <div><label for="b_rooms" class="req">Number of rooms</label><select id="b_rooms" name="rooms" required></select></div>
+      <div><label for="b_guests" class="req">Number of guests</label><input id="b_guests" name="guests" type="number" min="1" max="200" required inputmode="numeric"></div>
+    </div>
+    <p class="hint" id="b_hint"></p>
+    <div><label for="b_name" class="req">Guest name</label><input id="b_name" name="guest_name" required autocomplete="name" maxlength="100"></div>
+    <div class="row">
+      <div><label for="b_phone" class="req">Mobile number</label><input id="b_phone" name="phone" type="tel" required inputmode="tel" autocomplete="tel" pattern="[+]?[0-9 \-]{10,16}" title="10 to 13 digits" maxlength="20"></div>
+      <div><label for="b_email">Email (optional)</label><input id="b_email" name="email" type="email" autocomplete="email" maxlength="120"></div>
+    </div>
+    <div class="row">
+      <div><label for="b_idtype" class="req">ID proof type</label><select id="b_idtype" name="id_type" required></select></div>
+      <div><label for="b_idno" class="req">ID proof number</label><input id="b_idno" name="id_number" required maxlength="30" autocomplete="off"></div>
+    </div>
+    <div><label for="b_req">Special requests (optional)</label><textarea id="b_req" name="remarks" maxlength="500" placeholder="For example: ground floor, elderly guests"></textarea></div>
+    <p class="msg"><strong>Pay at counter on arrival.</strong> Nothing is charged online.</p>
+    <p id="b_err" class="msg error" role="alert" hidden></p>
+    <div class="foot">
+      <button type="button" class="btn secondary" id="b_back">Back</button>
+      <button type="submit" class="btn" id="b_submit">Confirm booking</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="cdlg" aria-labelledby="cdlg-h">
+  <form id="cform">
+    <h2 id="cdlg-h">Cancel this booking?</h2>
+    <p class="muted" id="c_intro"></p>
+    <div><label for="c_reason" class="req">Reason for cancellation</label><textarea id="c_reason" required maxlength="300"></textarea></div>
+    <p id="c_err" class="msg error" role="alert" hidden></p>
+    <div class="foot">
+      <button type="button" class="btn secondary" id="c_back">Keep my booking</button>
+      <button type="submit" class="btn danger" id="c_submit">Cancel booking</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+"use strict";
+const $ = (s, r = document) => r.querySelector(s);
+const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
+const fmtDate = (s) => new Intl.DateTimeFormat("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" }).format(new Date(s + "T00:00:00"));
+const fmtTime = (t) => new Intl.DateTimeFormat("en-IN", { hour: "numeric", minute: "2-digit" }).format(new Date("2000-01-01T" + t));
+const fmtWhen = (s) => new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(s));
+const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const addDays = (s, n) => { const d = new Date(s + "T00:00:00"); d.setDate(d.getDate() + n); return iso(d); };
+
+function h(tag, props, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (v == null || v === false) continue;
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (["value", "checked", "disabled", "selected", "required", "min", "max", "hidden"].includes(k)) e[k] = v;
+    else e.setAttribute(k, v === true ? "" : v);
+  }
+  const add = (k) => { if (Array.isArray(k)) k.forEach(add); else if (k != null && k !== false) e.append(k instanceof Node ? k : document.createTextNode(String(k))); };
+  kids.forEach(add);
+  return e;
+}
+const S = { info: null, search: null, last: null };
+const ID_TYPES = ["Aadhaar", "Voter ID", "Driving Licence", "Passport", "PAN", "Other"];
+
+function toast(msg) { const t = $("#toast"); t.replaceChildren(h("div", { class: "t" }, msg)); clearTimeout(toast.id); toast.id = setTimeout(() => t.replaceChildren(), 5000); }
+async function api(path, body) {
+  const res = await fetch(path, { method: body === undefined ? "GET" : "POST", headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Something went wrong. Please try again.");
+  return data;
+}
+const loading = () => h("div", { role: "status", "aria-label": "Loading" }, [1, 2].map(() => h("div", { class: "skeleton", style: "height:9rem" })));
+const note = (cls, ...k) => h("div", { class: "msg " + cls, role: cls === "error" ? "alert" : "status" }, ...k);
+const photo = () => h("div", { class: "photo", "aria-hidden": "true" }, h("svg", { viewBox: "0 0 40 40" }, h("path", { d: "M20 3l4 5h-8zM13 8h14l3 6H10zM9 14h22l3 7H6zM5 21h30v3H5zM8 24h24v12H8z", fill: "#c8872c" })), h("span", null, "Photo coming soon"));
+const dl = (pairs, cls) => h("dl", { class: "facts " + (cls || "") }, pairs.filter(Boolean).flatMap(([k, v, c]) => [h("dt", { class: c }, k), h("dd", { class: c }, v)]));
+
+// ---------- home: search + results + properties ----------
+function homeView(root) {
+  const i = S.info, today = i.today;
+  const s = S.search || { check_in: addDays(today, 1), check_out: addDays(today, 2), guests: 2, property_id: "", room_type_id: "" };
+  const opt = (v, l, sel) => h("option", { value: v, selected: String(v) === String(sel) }, l);
+  const f = h("form", { class: "card search", id: "search", "aria-label": "Check availability" },
+    h("div", null, h("label", { for: "s_in", class: "req" }, "Check-in"), h("input", { id: "s_in", name: "check_in", type: "date", required: true, min: today, max: i.last_check_in, value: s.check_in })),
+    h("div", null, h("label", { for: "s_out", class: "req" }, "Check-out"), h("input", { id: "s_out", name: "check_out", type: "date", required: true, min: addDays(today, 1), value: s.check_out })),
+    h("div", null, h("label", { for: "s_guests", class: "req" }, "Guests"), h("input", { id: "s_guests", name: "guests", type: "number", min: 1, max: 200, required: true, inputmode: "numeric", value: s.guests })),
+    h("div", null, h("label", { for: "s_prop" }, "Property (optional)"), h("select", { id: "s_prop", name: "property_id" }, opt("", "Any property", s.property_id), i.properties.map((p) => opt(p.id, p.name, s.property_id)))),
+    h("div", null, h("label", { for: "s_type" }, "Room type (optional)"), h("select", { id: "s_type", name: "room_type_id" }, opt("", "Any type", s.room_type_id), i.room_types.map((t) => opt(t.id, t.name, s.room_type_id)))),
+    h("p", { class: "stay span", id: "stay", "aria-live": "polite" }),
+    h("button", { class: "btn", type: "submit" }, "Check availability"));
+  const results = h("section", { "aria-labelledby": "res-h" }, h("h2", { id: "res-h", tabindex: "-1" }, "Available rooms"), h("div", { id: "results", "aria-live": "polite" }));
+  const props = h("section", { "aria-labelledby": "props-h" }, h("h2", { id: "props-h" }, "Our guest houses"),
+    h("ul", { class: "props" }, i.properties.map((p) => h("li", null, h("article", { class: "card pcard" }, photo(), h("div", { class: "body" },
+      h("h3", null, p.name), h("p", { class: "small muted" }, p.address), h("p", null, p.description),
+      h("ul", { class: "chips", "aria-label": "Facilities" }, (p.facilities || "").split(",").map((x) => x.trim()).filter(Boolean).map((x) => h("li", null, x))),
+      p.room_types.length ? h("p", { class: "small" }, h("strong", null, "Rooms: "), p.room_types.join(", ")) : null,
+      h("button", { class: "btn secondary", type: "button", onclick: () => { $("#s_prop").value = p.id; f.requestSubmit(); } }, "Check availability here"))))) ));
+  const st = i.settings;
+  const policy = h("section", { "aria-labelledby": "know-h" }, h("h2", { id: "know-h" }, "Good to know"), h("div", { class: "info" },
+    h("div", { class: "card" }, h("h3", null, "Check-in and check-out"), h("p", null, `Check-in from ${fmtTime(st.checkin_time)}. Check-out by ${fmtTime(st.checkout_time)}.`)),
+    h("div", { class: "card" }, h("h3", null, "Payment"), h("p", null, "Pay at the counter when you arrive. Nothing is charged online.")),
+    h("div", { class: "card" }, h("h3", null, "Cancellation"), h("p", null, st.guest_cancel_cutoff_hours ? `Cancel online up to ${st.guest_cancel_cutoff_hours} hours before check-in. After that, please call the property.` : "Cancel online until check-in time."))));
+  root.replaceChildren(f, results, props, policy);
+  const stay = () => {
+    const a = f.elements.check_in.value, b = f.elements.check_out.value;
+    const n = a && b ? Math.round((new Date(b) - new Date(a)) / 864e5) : 0;
+    $("#stay").textContent = n > 0 ? `${fmtDate(a)} → ${fmtDate(b)} · ${n} night${n > 1 ? "s" : ""}` : "Choose your check-in and check-out dates.";
+  };
+  f.elements.check_in.addEventListener("change", () => {
+    const a = f.elements.check_in.value; if (!a) return;
+    f.elements.check_out.min = addDays(a, 1);
+    if (f.elements.check_out.value <= a) f.elements.check_out.value = addDays(a, 1);
+  });
+  f.addEventListener("input", stay); stay();
+  f.addEventListener("submit", (e) => { e.preventDefault(); runSearch(Object.fromEntries(new FormData(f))); });
+  runSearch(Object.fromEntries(new FormData(f)), true);
+}
+
+async function runSearch(q, quiet) {
+  S.search = q;
+  const out = $("#results"); out.setAttribute("aria-busy", "true"); out.replaceChildren(loading());
+  try {
+    const r = await api("/api/public/search?" + new URLSearchParams(Object.entries(q).filter(([, v]) => v !== "")));
+    S.result = r;
+    if (!r.properties.length) out.replaceChildren(note("", h("strong", null, "No rooms are available for these dates and guests."), h("p", { class: "muted" }, "Try different dates, fewer guests, or another property.")));
+    else out.replaceChildren(h("p", { class: "muted" }, `${r.nights} night${r.nights > 1 ? "s" : ""} · ${fmtDate(r.check_in)} to ${fmtDate(r.check_out)} · ${r.guests} guest${r.guests > 1 ? "s" : ""}`),
+      ...r.properties.map((p) => h("div", { class: "prop" }, h("h3", null, p.property), h("p", { class: "small muted" }, p.address),
+        h("ul", { class: "types" }, p.types.map((t) => h("li", null, roomCard(p, t, r)))))));
+    if (!quiet) { $("#res-h").focus(); $("#res-h").scrollIntoView({ block: "start" }); }
+  } catch (e) { out.replaceChildren(note("error", h("strong", null, "We couldn't check availability."), h("p", null, e.message), h("button", { class: "btn secondary small", type: "button", onclick: () => runSearch(q) }, "Try again"))); }
+  finally { out.removeAttribute("aria-busy"); }
+}
+
+function roomCard(p, t, r) {
+  return h("article", { class: "card rt" },
+    h("div", { style: "display:flex;justify-content:space-between;gap:.5rem;align-items:start" }, h("h4", null, t.type), h("span", { class: "badge s-available" }, t.few_left ? "Available · few left" : "Available")),
+    h("p", { class: "small muted" }, `Sleeps ${t.capacity}${t.description ? " · " + t.description : ""}`),
+    t.amenities.length ? h("ul", { class: "chips", "aria-label": "Amenities" }, t.amenities.map((a) => h("li", null, a))) : null,
+    t.rooms_needed > 1 ? h("p", { class: "small" }, `For ${r.guests} guests you need ${t.rooms_needed} rooms of this type.`) : null,
+    h("div", { class: "foot" }, h("div", null, h("div", { class: "price" }, inr.format(t.tariff), h("span", { class: "small muted", style: "font:400 .85rem system-ui" }, " per room per night")),
+      h("div", { class: "small muted" }, `${inr.format(t.total_per_room)} for ${t.nights} night${t.nights > 1 ? "s" : ""}`)),
+      h("button", { class: "btn", type: "button", "aria-label": `Book ${t.type} at ${p.property}`, onclick: (e) => openBook(p, t, r, e.currentTarget) }, "Book this room")));
+}
+
+// ---------- booking dialog ----------
+let bctx = null;
+function openBook(p, t, r, opener) {
+  bctx = { p, t, r, opener };
+  const rooms = $("#b_rooms");
+  rooms.replaceChildren(...Array.from({ length: t.can_book }, (_, i) => h("option", { value: i + 1, selected: i + 1 === Math.min(t.rooms_needed, t.can_book) }, i + 1)));
+  $("#b_idtype").replaceChildren(...ID_TYPES.map((x) => h("option", { value: x }, x)));
+  $("#b_guests").value = r.guests; $("#b_err").hidden = true;
+  updateSummary(); $("#bdlg").showModal();
+}
+function updateSummary() {
+  const { p, t, r } = bctx, n = +$("#b_rooms").value || 1, st = S.info.settings;
+  $("#b_guests").min = n; $("#b_guests").max = n * t.capacity;
+  $("#b_hint").textContent = `${n} room${n > 1 ? "s" : ""} of ${t.type} sleep${n > 1 ? "" : "s"} up to ${n * t.capacity} guests in total.`;
+  $("#bsum").replaceChildren(...dl([["Property", p.property], ["Room type", t.type], ["Check-in", `${fmtDate(r.check_in)}, from ${fmtTime(st.checkin_time)}`],
+    ["Check-out", `${fmtDate(r.check_out)}, by ${fmtTime(st.checkout_time)}`], ["Nights", r.nights], ["Rooms", `${n} × ${inr.format(t.tariff)} per night`],
+    ["Total amount", inr.format(n * t.total_per_room), "total"]]).children);
+}
+$("#b_rooms").addEventListener("change", updateSummary);
+$("#b_back").onclick = () => $("#bdlg").close();
+$("#bdlg").addEventListener("close", () => { if (bctx?.opener?.isConnected) bctx.opener.focus(); });
+$("#bform").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const { p, t, r } = bctx, btn = $("#b_submit"), err = $("#b_err");
+  err.hidden = true; btn.disabled = true; btn.textContent = "Booking…";
+  const v = Object.fromEntries(new FormData($("#bform")));
+  try {
+    const b = await api("/api/public/book", { ...v, property_id: p.property_id, room_type_id: t.room_type_id, check_in: r.check_in, check_out: r.check_out, payment_method: "pay_at_counter" });
+    S.last = b; try { sessionStorage.setItem("last", JSON.stringify({ id: b.booking_id, phone: v.phone })); } catch {}
+    bctx.opener = null; $("#bdlg").close(); $("#bform").reset(); location.hash = "#/confirmed";
+  } catch (x) {
+    err.textContent = x.message; err.hidden = false; err.scrollIntoView({ block: "nearest" });
+    if (/no longer available/i.test(x.message)) runSearch(S.search, true);
+  } finally { btn.disabled = false; btn.textContent = "Confirm booking"; }
+});
+
+// ---------- booking details (confirmation + My Booking) ----------
+function bookingCard(b, confirmed) {
+  const p = b.property, cancelled = b.status === "Cancelled";
+  const statusClass = { Confirmed: "booked", "Checked-In": "occupied" }[b.status] || "neutral";
+  return h("article", { class: "card conf" + (cancelled ? " cancelled" : ""), "aria-label": "Booking details" },
+    confirmed ? h("div", null, h("p", { class: "eyebrow", style: "color:var(--ok)" }, "Booking confirmed"), h("p", null, "Thank you. Please keep your booking ID and mobile number: you need both to view or cancel this booking.")) : null,
+    h("div", null, h("div", { class: "small muted" }, "Booking ID"), h("div", { class: "id" }, "#" + b.booking_id), h("span", { class: "badge s-" + statusClass }, b.status)),
+    h("div", { class: "grid2" },
+      h("div", null, h("h3", null, "Your stay"), dl([["Property", p.name], ["Room type", `${b.room_type}${b.rooms > 1 ? " × " + b.rooms : ""}`], ["Guests", b.guests], ["Check-in", `${fmtDate(b.check_in)}, from ${fmtTime(b.check_in_time)}`],
+        ["Check-out", `${fmtDate(b.check_out)}, by ${fmtTime(b.check_out_time)}`], ["Nights", b.nights], ["Guest name", b.guest_name], ["Mobile", b.mobile], b.special_requests ? ["Requests", b.special_requests] : null])),
+      h("div", null, h("h3", null, "Amount and payment"), dl([["Total amount", inr.format(b.amount), "total"], ["Payment", b.payment.method]]),
+        h("h3", { style: "margin-top:1rem" }, "Property contact"), h("p", null, h("strong", null, p.name)), h("p", { class: "small" }, p.address),
+        h("p", { class: "small" }, `${p.contact_person ? p.contact_person + " · " : ""}`, h("a", { href: "tel:" + p.phone }, p.phone)))),
+    cancelled && b.cancel_reason ? h("p", { class: "muted" }, "Cancelled: " + b.cancel_reason) : null,
+    h("div", { class: "actions noprint" }, h("button", { class: "btn", type: "button", onclick: () => window.print() }, "Print / Save as PDF"),
+      b.can_cancel ? h("button", { class: "btn danger", type: "button", onclick: (e) => openCancel(b, e.currentTarget) }, "Cancel booking") : null,
+      h("a", { class: "btn secondary", href: "#/", style: "text-decoration:none;display:inline-grid;place-items:center" }, "Book another room")),
+    b.status === "Confirmed" ? h("p", { class: "small muted noprint" }, b.can_cancel ? `You can cancel online until ${fmtWhen(b.cancel_deadline)}.` : `Online cancellation closed on ${fmtWhen(b.cancel_deadline)}. Please call ${p.phone} to cancel.`) : null);
+}
+
+function confirmedView(root) {
+  let saved = null; try { saved = JSON.parse(sessionStorage.getItem("last")); } catch {}
+  if (!S.last && !saved) { location.hash = "#/booking"; return; }
+  const box = h("div"); root.replaceChildren(h("h1", { tabindex: "-1" }, "Your booking"), box);
+  const show = (b) => { S.last = b; box.replaceChildren(bookingCard(b, true)); root.querySelector("h1").focus(); };
+  if (S.last) show(S.last);
+  else { box.replaceChildren(loading()); api("/api/public/booking/lookup", { booking_id: saved.id, phone: saved.phone }).then(show).catch(() => { location.hash = "#/booking"; }); }
+}
+
+function myBookingView(root) {
+  const out = h("div", { "aria-live": "polite" });
+  const f = h("form", { class: "card lookup", "aria-label": "Find my booking" },
+    h("div", null, h("label", { for: "m_id", class: "req" }, "Booking ID"), h("input", { id: "m_id", name: "booking_id", required: true, inputmode: "numeric", autocomplete: "off", placeholder: "e.g. 48" })),
+    h("div", null, h("label", { for: "m_phone", class: "req" }, "Mobile number used for the booking"), h("input", { id: "m_phone", name: "phone", type: "tel", required: true, inputmode: "tel", autocomplete: "tel" })),
+    h("button", { class: "btn", type: "submit" }, "Find my booking"));
+  root.replaceChildren(h("h1", { tabindex: "-1" }, "My booking"), h("p", { class: "muted" }, "Enter your booking ID and mobile number to view or cancel your booking."), f, out);
+  f.addEventListener("submit", async (e) => {
+    e.preventDefault(); out.replaceChildren(loading());
+    const v = Object.fromEntries(new FormData(f));
+    try { const b = await api("/api/public/booking/lookup", v); S.lookup = v; out.replaceChildren(bookingCard(b, false)); }
+    catch (x) { out.replaceChildren(note("error", x.message)); }
+  });
+  S.reload = () => f.requestSubmit();
+}
+
+let cctx = null;
+function openCancel(b, opener) {
+  cctx = { b, opener }; $("#c_reason").value = ""; $("#c_err").hidden = true;
+  $("#c_intro").textContent = `Booking #${b.booking_id} at ${b.property.name}, ${fmtDate(b.check_in)} to ${fmtDate(b.check_out)}.`;
+  $("#cdlg").showModal();
+}
+$("#c_back").onclick = () => $("#cdlg").close();
+$("#cdlg").addEventListener("close", () => { if (cctx?.opener?.isConnected) cctx.opener.focus(); });
+$("#cform").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const { b } = cctx, btn = $("#c_submit"); btn.disabled = true; $("#c_err").hidden = true;
+  try {
+    const phone = S.lookup?.phone || JSON.parse(sessionStorage.getItem("last") || "{}").phone || b.mobile;
+    const r = await api("/api/public/booking/cancel", { booking_id: b.booking_id, phone, reason: $("#c_reason").value });
+    cctx.opener = null; $("#cdlg").close(); toast("Your booking has been cancelled.");
+    const box = $("#view article")?.parentElement; if (box) box.replaceChildren(bookingCard(r, false));
+  } catch (x) { $("#c_err").textContent = x.message; $("#c_err").hidden = false; }
+  finally { btn.disabled = false; }
+});
+
+// ---------- router, menu, start ----------
+async function route() {
+  const name = location.hash.replace(/^#\/?/, "").split("/")[0] || "home";
+  const root = $("#view");
+  $("#hero").hidden = name !== "home";
+  document.querySelectorAll("#nav a[data-r]").forEach((a) => { if (a.dataset.r === name) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
+  if (!S.info) { root.replaceChildren(loading()); try { S.info = await api("/api/public/info"); } catch (e) { root.replaceChildren(note("error", h("strong", null, "The booking site is not reachable right now."), h("p", null, e.message))); return; } }
+  if (!S.info.settings.guest_booking_enabled && name === "home") { root.replaceChildren(note("", h("h2", null, "Online booking is closed right now"), h("p", null, "Please contact the property directly to book a room."), h("p", { style: "margin-top:.5rem" }, h("a", { href: "#/booking" }, "Already booked? Look up your booking."))), h("section", { style: "margin-top:2rem" }, h("h2", null, "Our guest houses"), h("ul", { class: "props" }, S.info.properties.map((p) => h("li", { class: "card", style: "padding:1rem" }, h("h3", null, p.name), h("p", { class: "small muted" }, p.address), h("p", null, p.phone)))))); return; }
+  ({ home: homeView, booking: myBookingView, confirmed: confirmedView }[name] || homeView)(root);
+  document.title = ({ home: "Book a room", booking: "My booking", confirmed: "Booking confirmed" }[name] || "Book a room") + " · Mantralayam Rooms";
+  closeMenu();
+}
+const nav = $("#nav"), mq = matchMedia("(max-width: 960px)");
+function closeMenu() { $("#menu-btn").setAttribute("aria-expanded", "false"); nav.hidden = mq.matches; }
+$("#menu-btn").onclick = () => { const o = $("#menu-btn").getAttribute("aria-expanded") !== "true"; $("#menu-btn").setAttribute("aria-expanded", o); nav.hidden = !o; };
+mq.addEventListener("change", closeMenu); closeMenu();
+window.addEventListener("hashchange", () => { route(); window.scrollTo({ top: 0 }); });
+route();
+</script>
+<noscript><p style="padding:2rem">This booking site needs JavaScript. Please call the property to book a room.</p></noscript>
+</body>
+</html>
