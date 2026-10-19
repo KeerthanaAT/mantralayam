@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:,">
+<title>Staff · Mantralayam Rooms</title>
+<link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/shared.css">
+<link rel="stylesheet" href="/staff.css">
+</head>
+<body>
+<a class="skip" href="#view">Skip to main content</a>
+
+<header class="top" id="chrome" hidden>
+  <div class="bar">
+    <div class="brand">
+      <svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 3l4 5h-8zM13 8h14l3 6H10zM9 14h22l3 7H6zM5 21h30v3H5zM8 24h24v12H8z" fill="#e8870e"/></svg>
+      <span>Mantralayam Rooms<small>Staff</small></span>
+    </div>
+    <button class="btn" id="menu-btn" type="button" aria-expanded="false" aria-controls="nav">Menu</button>
+    <nav class="main" id="nav" aria-label="Staff">
+      <ul id="navlist"></ul>
+    </nav>
+    <div class="who" id="who"></div>
+    <button class="btn" id="signout" type="button">Sign out</button>
+  </div>
+</header>
+
+<main id="view" tabindex="-1"></main>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<dialog id="bdlg" aria-labelledby="bdlg-h">
+  <form id="bform" method="dialog" novalidate>
+    <h2 id="bdlg-h">New booking (walk-in)</h2>
+    <div class="row">
+      <div><label for="b_prop" class="req">Property</label><select id="b_prop" name="property_id" required></select></div>
+      <div><label for="b_room" class="req">Room</label><select id="b_room" name="room_id" required></select></div>
+    </div>
+    <div class="row">
+      <div><label for="b_in" class="req">Check-in</label><input id="b_in" name="check_in" type="date" required></div>
+      <div><label for="b_out" class="req">Check-out</label><input id="b_out" name="check_out" type="date" required></div>
+    </div>
+    <p class="hint" id="b_hint">Rooms show their status on the check-in date. The server checks the whole stay.</p>
+    <div><label for="b_name" class="req">Guest name</label><input id="b_name" name="guest_name" required maxlength="100" autocomplete="off"></div>
+    <div class="row">
+      <div><label for="b_phone" class="req">Mobile number</label><input id="b_phone" name="phone" type="tel" required inputmode="tel" maxlength="20" autocomplete="off"></div>
+      <div><label for="b_guests" class="req">Guests</label><input id="b_guests" name="guests" type="number" min="1" max="200" value="1" required inputmode="numeric"></div>
+    </div>
+    <div class="row">
+      <div><label for="b_idtype" class="req">ID proof type</label><select id="b_idtype" name="id_type" required></select></div>
+      <div><label for="b_idno" class="req">ID proof number</label><input id="b_idno" name="id_number" required maxlength="30" autocomplete="off"></div>
+    </div>
+    <div><label for="b_remarks">Remarks (optional)</label><textarea id="b_remarks" name="remarks" maxlength="500"></textarea></div>
+    <p id="b_err" class="msg error" role="alert" hidden></p>
+    <div class="foot">
+      <button type="button" class="btn secondary" id="b_back">Close</button>
+      <button type="submit" class="btn" id="b_submit">Create booking</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="cdlg" aria-labelledby="cdlg-h">
+  <form id="cform" method="dialog">
+    <h2 id="cdlg-h">Cancel booking</h2>
+    <p class="muted" id="c_intro"></p>
+    <div><label for="c_reason" class="req">Reason for cancellation</label><textarea id="c_reason" required maxlength="300"></textarea></div>
+    <p id="c_err" class="msg error" role="alert" hidden></p>
+    <div class="foot">
+      <button type="button" class="btn secondary" id="c_back">Keep booking</button>
+      <button type="submit" class="btn danger" id="c_submit">Cancel booking</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="kdlg" aria-labelledby="kdlg-h">
+  <form id="kform" method="dialog">
+    <h2 id="kdlg-h">Change room status</h2>
+    <div class="row">
+      <div><label for="k_prop" class="req">Property</label><select id="k_prop" required></select></div>
+      <div><label for="k_room" class="req">Room</label><select id="k_room" name="room_id" required></select></div>
+    </div>
+    <div class="row">
+      <div><label for="k_kind" class="req">Status</label><select id="k_kind" name="kind" required></select></div>
+      <div id="k_cat_box"><label for="k_cat" class="req">Issue category</label><select id="k_cat" name="issue_category"></select></div>
+    </div>
+    <div class="row">
+      <div><label for="k_start" class="req">From</label><input id="k_start" name="start_date" type="date" required></div>
+      <div><label for="k_end" id="k_end_l">Available again on</label><input id="k_end" name="end_date" type="date"></div>
+    </div>
+    <div><label for="k_reason" class="req">Reason</label><textarea id="k_reason" name="reason" required maxlength="300"></textarea></div>
+    <p id="k_err" class="msg error" role="alert" hidden></p>
+    <div class="foot">
+      <button type="button" class="btn secondary" id="k_back">Close</button>
+      <button type="submit" class="btn" id="k_submit">Save status</button>
+    </div>
+  </form>
+</dialog>
+
+<noscript><p style="padding:2rem">The staff app needs JavaScript.</p></noscript>
+<script>
+"use strict";
+const $ = (s, r = document) => r.querySelector(s);
+const dateFmt = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric" });
+const fmtDate = (s) => (s ? dateFmt.format(new Date(s + "T00:00:00")) : "");
+const fmtWhen = (s) => new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }).format(new Date(s));
+const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0, useGrouping: false });
+
+function h(tag, props, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (v == null || v === false) continue;
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (["value", "checked", "disabled", "selected", "required", "min", "max", "hidden"].includes(k)) e[k] = v;
+    else e.setAttribute(k, v === true ? "" : v);
+  }
+  const add = (k) => { if (Array.isArray(k)) k.forEach(add); else if (k != null && k !== false) e.append(k instanceof Node ? k : document.createTextNode(String(k))); };
+  kids.forEach(add);
+  return e;
+}
+const S = { meta: null, prop: "", date: "", bdate: "", q: "", status: "" };
+const qs = (o) => new URLSearchParams(Object.entries(o).filter(([, v]) => v !== "" && v != null)).toString();
+const STATUS_CLASS = { Confirmed: "booked", "Checked-In": "occupied", "Checked-Out": "neutral", Cancelled: "blocked", "No-Show": "maintenance" };
+const ROOM_LABEL = { available: "Available", booked: "Booked", occupied: "Occupied", blocked: "Blocked", cleaning: "Cleaning", maintenance: "Maintenance", out_of_service: "Out of service" };
+const KIND_LABEL = { internal_block: "Blocked", maintenance: "Maintenance", out_of_service: "Out of service", cleaning_required: "Needs cleaning", in_cleaning: "Being cleaned" };
+
+function toast(msg) { $("#toast").replaceChildren(h("div", { class: "t" }, msg)); clearTimeout(toast.id); toast.id = setTimeout(() => $("#toast").replaceChildren(), 6000); }
+async function api(path, body) {
+  const res = await fetch(path, { method: body === undefined ? "GET" : "POST", headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && S.meta) { S.meta = null; route(); }
+  if (!res.ok) throw new Error(data.error || "Something went wrong. Please try again.");
+  return data;
+}
+const loading = () => h("div", { role: "status", "aria-label": "Loading" }, [1, 2, 3].map(() => h("div", { class: "skeleton" })));
+const fail = (e, retry) => h("div", { class: "msg error", role: "alert" }, h("strong", null, "This could not be loaded."), h("p", null, e.message), h("button", { class: "btn secondary small", type: "button", onclick: retry }, "Try again"));
+const badge = (cls, text) => h("span", { class: "badge s-" + cls }, text);
+const opt = (v, l, sel) => h("option", { value: v, selected: String(v) === String(sel) }, l);
+const can = (k) => S.meta.can[k];
+
+// ---------- chrome, routing ----------
+const VIEWS = { today: ["Today", todayView], rooms: ["Rooms", roomsView], bookings: ["Bookings", bookingsView], status: ["Room status", statusView], audit: ["Audit log", auditView] };
+function chrome() {
+  $("#chrome").hidden = !S.meta;
+  if (!S.meta) return;
+  const cur = location.hash.replace(/^#\/?/, "") || "today";
+  $("#navlist").replaceChildren(...Object.entries(VIEWS).filter(([k]) => k !== "audit" || can("audit")).map(([k, [label]]) =>
+    h("li", null, h("a", { href: "#/" + (k === "today" ? "" : k), "data-r": k, "aria-current": k === cur ? "page" : null }, label))));
+  $("#who").replaceChildren(h("strong", null, S.meta.user.full_name), S.meta.user.role.replace("_", " "));
+}
+const propSelect = (onchange) => S.meta.properties.length < 2 ? null : h("div", null, h("label", { for: "f_prop" }, "Property"),
+  h("select", { id: "f_prop", onchange: (e) => { S.prop = e.target.value; onchange(); } }, opt("", "All my properties", S.prop), S.meta.properties.map((p) => opt(p.id, p.name, S.prop))));
+
+async function route() {
+  const root = $("#view");
+  if (!S.meta) { try { S.meta = await api("/api/meta"); } catch { chrome(); return loginView(root); } }
+  chrome();
+  const name = location.hash.replace(/^#\/?/, "").split("/")[0] || "today";
+  const [label, fn] = VIEWS[name] && (name !== "audit" || can("audit")) ? VIEWS[name] : VIEWS.today;
+  document.title = label + " · Mantralayam Staff";
+  root.replaceChildren(loading());
+  try { await fn(root); } catch (e) { root.replaceChildren(fail(e, route)); }
+  const hd = $("h1", root); if (hd) { hd.tabIndex = -1; hd.focus({ preventScroll: true }); }
+  closeMenu();
+}
+window.addEventListener("hashchange", () => { route(); window.scrollTo({ top: 0 }); });
+const mq = matchMedia("(max-width: 960px)");
+function closeMenu() { $("#menu-btn").setAttribute("aria-expanded", "false"); $("#nav").hidden = mq.matches; }
+$("#menu-btn").onclick = () => { const o = $("#menu-btn").getAttribute("aria-expanded") !== "true"; $("#menu-btn").setAttribute("aria-expanded", o); $("#nav").hidden = !o; };
+mq.addEventListener("change", closeMenu);
+$("#signout").onclick = async () => { try { await api("/api/logout", {}); } catch {} S.meta = null; location.hash = "#/"; route(); };
+
+function loginView(root) {
+  document.title = "Staff sign in · Mantralayam";
+  const err = h("p", { class: "msg error", role: "alert", hidden: true });
+  const f = h("form", { class: "card", "aria-label": "Staff sign in" },
+    h("div", null, h("label", { for: "u", class: "req" }, "Username"), h("input", { id: "u", name: "username", required: true, autocomplete: "username", autocapitalize: "none" })),
+    h("div", null, h("label", { for: "p", class: "req" }, "Password"), h("input", { id: "p", name: "password", type: "password", required: true, autocomplete: "current-password" })),
+    err, h("button", { class: "btn", type: "submit" }, "Sign in"));
+  f.addEventListener("submit", async (e) => {
+    e.preventDefault(); err.hidden = true;
+    try { S.meta = await api("/api/login", Object.fromEntries(new FormData(f))); route(); }
+    catch (x) { err.textContent = x.message; err.hidden = false; $("#p").value = ""; $("#p").focus(); }
+  });
+  root.replaceChildren(h("div", { class: "login" }, h("h1", null, "Staff sign in"), h("p", { class: "muted" }, "For property staff only. Guests book at the main website."), f));
+  $("#u").focus();
+}
+
+// ---------- shared pieces ----------
+function bookingTable(rows, caption, empty) {
+  if (!rows.length) return h("section", null, h("h2", null, caption), h("p", { class: "empty card" }, empty));
+  const today = S.meta.today;
+  return h("div", { class: "scroll", role: "region", "aria-label": caption, tabindex: "0" }, h("table", null, h("caption", null, caption),
+    h("thead", null, h("tr", null, ["Booking", "Guest", "Room", "Stay", "Guests", "Status", "Actions"].map((t) => h("th", { scope: "col" }, t)))),
+    h("tbody", null, rows.map((b) => h("tr", null,
+      h("td", null, "#" + b.id, b.source === "online" ? h("div", { class: "small muted" }, "Online") : null),
+      h("td", null, h("strong", null, b.guest_name), h("div", { class: "small muted" }, b.phone, " · ID ", b.id_type, " ", b.id_tail)),
+      h("td", null, b.room, h("div", { class: "small muted" }, b.property)),
+      h("td", null, fmtDate(b.check_in), " to ", fmtDate(b.check_out), b.cancel_reason ? h("div", { class: "small muted" }, "Reason: " + b.cancel_reason) : null),
+      h("td", null, b.guests),
+      h("td", null, badge(STATUS_CLASS[b.status] || "neutral", b.status)),
+      h("td", { class: "actions" }, can("book") ? bookingActions(b, today) : null))))));
+}
+function bookingActions(b, today) {
+  const btn = (label, cls, fn) => h("button", { class: "btn small " + cls, type: "button", "aria-label": `${label} booking ${b.id}, ${b.guest_name}`, onclick: fn }, label);
+  const out = [];
+  if (b.status === "Confirmed") {
+    if (b.check_in <= today && today < b.check_out) out.push(btn("Check in", "", () => act(b, "checkin", "Checked in.")));
+    if (b.check_in <= today) out.push(btn("No-show", "secondary", () => act(b, "noshow", "Marked as no-show.")));
+    out.push(btn("Cancel", "danger", () => openCancel(b)));
+  } else if (b.status === "Checked-In") out.push(btn("Check out", "", () => act(b, "checkout", "Checked out. The room now needs cleaning.")));
+  return out;
+}
+async function act(b, action, done, body) {
+  try { await api(`/api/bookings/${b.id}/${action}`, body || {}); toast(`Booking #${b.id}: ${done}`); route(); }
+  catch (e) { toast(e.message); }
+}
+
+// ---------- views ----------
+async function todayView(root) {
+  const load = async () => {
+    const d = await api("/api/dashboard?" + qs({ property_id: S.prop }));
+    const card = (n, l, warn) => h("li", { class: warn && n ? "warn" : "" }, h("strong", null, n), h("span", null, l));
+    out.replaceChildren(
+      h("ul", { class: "counts", "aria-label": "Today at a glance" }, card(d.arrivals.length, "Arrivals today"), card(d.overdue.length, "Late arrivals to resolve", true),
+        card(d.inhouse.length + d.due_out.length, "Guests in house"), card(d.due_out.length, "Due out", true), card(`${d.rooms.available || 0} of ${d.total_rooms}`, "Rooms available now")),
+      ...[d.overdue.length ? bookingTable(d.overdue, "Late arrivals (check-in date has passed)", "") : null,
+      bookingTable(d.arrivals, "Arrivals today", "No arrivals expected today."),
+      bookingTable(d.due_out, "Due out today or overdue", "No guests are due out."),
+      bookingTable(d.inhouse, "In house", "No guests are checked in.")].filter(Boolean));
+  };
+  const out = h("div", { style: "display:grid;gap:1.5rem" }, loading());
+  root.replaceChildren(h("div", { class: "head" }, h("h1", null, "Today · " + fmtDate(S.meta.today)),
+    h("div", { class: "toolbar" }, propSelect(() => { out.replaceChildren(loading()); load().catch((e) => out.replaceChildren(fail(e, load))); }),
+      can("book") ? h("button", { class: "btn", type: "button", onclick: () => openBook() }, "New walk-in booking") : null)), out);
+  await load();
+}
+
+async function roomsView(root) {
+  S.date = S.date || S.meta.today;
+  const out = h("div", { style: "display:grid;gap:1.5rem" });
+  const load = async () => {
+    out.replaceChildren(loading());
+    const rooms = await api("/api/rooms?" + qs({ property_id: S.prop, date: S.date })), by = {};
+    rooms.forEach((r) => (by[r.property] ||= []).push(r));
+    out.replaceChildren(h("ul", { class: "legend", "aria-label": "Status key" }, Object.entries(ROOM_LABEL).map(([k, l]) => h("li", null, badge(k, l)))),
+      ...Object.entries(by).map(([p, rs]) => h("section", { "aria-label": p }, h("h2", { style: "margin-bottom:.75rem" }, p),
+        h("ul", { class: "tiles" }, rs.map((r) => h("li", null, h("div", { class: "tile" },
+          h("h3", null, "Room " + r.number), h("div", { class: "small muted" }, `${r.type} · sleeps ${r.capacity} · floor ${r.floor}`), badge(r.status, ROOM_LABEL[r.status]),
+          r.note ? h("div", { class: "note" }, r.note) : null,
+          r.status === "available" && can("book") ? h("button", { class: "btn small secondary", type: "button", "aria-label": `Book room ${r.number}`, onclick: () => openBook(r) }, "Book") : null)))))));
+  };
+  root.replaceChildren(h("h1", null, "Rooms"), h("div", { class: "toolbar" }, propSelect(() => load().catch((e) => out.replaceChildren(fail(e, load)))),
+    h("div", null, h("label", { for: "f_date" }, "Date"), h("input", { id: "f_date", type: "date", value: S.date, onchange: (e) => { S.date = e.target.value || S.meta.today; load().catch((x) => out.replaceChildren(fail(x, load))); } }))), out);
+  await load();
+}
+
+async function bookingsView(root) {
+  const out = h("div", null);
+  const load = async () => {
+    out.replaceChildren(loading());
+    const rows = await api("/api/bookings?" + qs({ property_id: S.prop, q: S.q, status: S.status, date: S.bdate }));
+    out.replaceChildren(...[rows.length >= 300 ? h("p", { class: "muted small" }, "Showing the latest 300 matches. Narrow your search to see others.") : null, bookingTable(rows, `Bookings (${rows.length})`, "No bookings match these filters.")].filter(Boolean));
+  };
+  const f = h("form", { class: "toolbar", role: "search", "aria-label": "Find bookings" }, propSelect(() => {}),
+    h("div", { class: "grow" }, h("label", { for: "f_q" }, "Guest, mobile, room or booking ID"), h("input", { id: "f_q", value: S.q, maxlength: 60 })),
+    h("div", null, h("label", { for: "f_st" }, "Status"), h("select", { id: "f_st" }, opt("", "Any status", S.status), Object.keys(STATUS_CLASS).map((s) => opt(s, s, S.status)))),
+    h("div", null, h("label", { for: "f_bd" }, "Staying on"), h("input", { id: "f_bd", type: "date", value: S.bdate || "" })),
+    h("button", { class: "btn", type: "submit" }, "Search"),
+    can("book") ? h("button", { class: "btn secondary", type: "button", onclick: () => openBook() }, "New walk-in booking") : null);
+  f.addEventListener("submit", (e) => { e.preventDefault(); S.q = $("#f_q").value; S.status = $("#f_st").value; S.bdate = $("#f_bd").value; load().catch((x) => out.replaceChildren(fail(x, load))); });
+  root.replaceChildren(h("h1", null, "Bookings"), f, out);
+  await load();
+}
+
+async function statusView(root) {
+  const ev = await api("/api/room_events?" + qs({ property_id: S.prop }));
+  const clear = (e, verb, done, path) => h("button", { class: "btn small secondary", type: "button", "aria-label": `${verb} room ${e.room}`, onclick: async () => {
+    try { await api(`/api/room_events/${e.id}/${path}`, {}); toast(`Room ${e.room}: ${done}`); route(); } catch (x) { toast(x.message); } } }, verb);
+  const cleaning = (e) => e.kind === "cleaning_required" || e.kind === "in_cleaning";
+  const table = ev.length ? h("div", { class: "scroll", role: "region", "aria-label": "Rooms not available", tabindex: "0" }, h("table", null, h("caption", null, `Rooms with a status (${ev.length})`),
+    h("thead", null, h("tr", null, ["Room", "Status", "Category", "Reason", "Since", "Until", "Actions"].map((t) => h("th", { scope: "col" }, t)))),
+    h("tbody", null, ev.map((e) => h("tr", null, h("td", null, e.room, h("div", { class: "small muted" }, e.property)),
+      h("td", null, badge(e.kind === "internal_block" ? "blocked" : cleaning(e) ? "cleaning" : e.kind, KIND_LABEL[e.kind])), h("td", null, e.issue_category || ""), h("td", null, e.reason || ""),
+      h("td", null, fmtDate(e.start_date)), h("td", null, e.end_date ? fmtDate(e.end_date) : "Until cleared"),
+      h("td", { class: "actions" }, [
+        e.kind === "cleaning_required" && can("clean") ? clear(e, "Start cleaning", "cleaning started.", "start_cleaning") : null,
+        cleaning(e) && can("clean") ? clear(e, "Mark clean", "ready for guests.", "release") : null,
+        !cleaning(e) && can("status") ? clear(e, "Clear status", "available again.", "release") : null])))))) : h("p", { class: "empty card" }, "Every room is available for use. Nothing is blocked, under maintenance or waiting for cleaning.");
+  root.replaceChildren(h("div", { class: "head" }, h("h1", null, "Room status"), h("div", { class: "toolbar" }, propSelect(route),
+    can("status") ? h("button", { class: "btn", type: "button", onclick: openStatus }, "Block a room or report an issue") : null)), table);
+}
+
+async function auditView(root) {
+  const out = h("div", null);
+  const load = async () => {
+    out.replaceChildren(loading());
+    const rows = await api("/api/audit?" + qs({ property_id: S.prop, q: $("#f_aq")?.value || "" }));
+    out.replaceChildren(rows.length ? h("div", { class: "scroll", role: "region", "aria-label": "Audit log", tabindex: "0" }, h("table", null, h("caption", null, `Latest ${rows.length} entries`),
+      h("thead", null, h("tr", null, ["When", "Who", "Action", "Where", "Details"].map((t) => h("th", { scope: "col" }, t)))),
+      h("tbody", null, rows.map((r) => h("tr", null, h("td", null, fmtWhen(r.ts)), h("td", null, r.username || "system", r.role ? h("div", { class: "small muted" }, r.role.replace("_", " ")) : null),
+        h("td", null, r.action), h("td", null, [r.property, r.room ? "room " + r.room : null].filter(Boolean).join(" · ")),
+        h("td", null, [r.old_value && r.new_value ? `${r.old_value} → ${r.new_value}` : r.new_value || r.old_value, r.reason].filter(Boolean).join(" · "))))))) : h("p", { class: "empty card" }, "No entries match."));
+  };
+  const f = h("form", { class: "toolbar", role: "search" }, propSelect(() => {}), h("div", { class: "grow" }, h("label", { for: "f_aq" }, "Search action, user or details"), h("input", { id: "f_aq", maxlength: 60 })), h("button", { class: "btn", type: "submit" }, "Search"));
+  f.addEventListener("submit", (e) => { e.preventDefault(); load().catch((x) => out.replaceChildren(fail(x, load))); });
+  root.replaceChildren(h("h1", null, "Audit log"), f, out);
+  await load();
+}
+
+// ---------- dialogs ----------
+const fillRooms = async (propEl, roomEl, date, keep) => {
+  try {
+    const rooms = await api("/api/rooms?" + qs({ property_id: propEl.value, date }));
+    roomEl.replaceChildren(...rooms.map((r) => opt(r.id, `Room ${r.number} · ${r.type} (sleeps ${r.capacity}) · ${ROOM_LABEL[r.status]}`, keep)));
+  } catch (e) { roomEl.replaceChildren(opt("", "Could not load rooms")); }
+};
+function openBook(room) {
+  const t = S.meta.today, f = $("#bform"), props = S.meta.properties;
+  f.reset(); $("#b_err").hidden = true;
+  $("#b_prop").replaceChildren(...props.map((p) => opt(p.id, p.name, room ? room.property_id : S.prop || props[0].id)));
+  $("#b_idtype").replaceChildren(...S.meta.id_types.map((x) => opt(x, x)));
+  $("#b_in").min = t; $("#b_in").value = room ? S.date || t : t; $("#b_out").value = addDay($("#b_in").value, 1); $("#b_out").min = addDay($("#b_in").value, 1);
+  fillRooms($("#b_prop"), $("#b_room"), $("#b_in").value, room && room.id);
+  $("#bdlg").showModal();
+}
+const addDay = (s, n) => { const d = new Date(s + "T00:00:00"); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+$("#b_prop").addEventListener("change", () => fillRooms($("#b_prop"), $("#b_room"), $("#b_in").value));
+$("#b_in").addEventListener("change", () => { const a = $("#b_in").value; if (!a) return; $("#b_out").min = addDay(a, 1); if ($("#b_out").value <= a) $("#b_out").value = addDay(a, 1); fillRooms($("#b_prop"), $("#b_room"), a, $("#b_room").value); });
+$("#b_back").onclick = () => $("#bdlg").close();
+$("#bform").addEventListener("submit", async (e) => {
+  e.preventDefault(); const btn = $("#b_submit"), err = $("#b_err"); err.hidden = true;
+  if (!$("#bform").reportValidity()) return;
+  btn.disabled = true; btn.textContent = "Saving…";
+  try { const b = await api("/api/bookings", Object.fromEntries(new FormData($("#bform")))); $("#bdlg").close(); toast(`Booking #${b.id} created for ${b.guest_name}, room ${b.room}.`); route(); }
+  catch (x) { err.textContent = x.message; err.hidden = false; err.scrollIntoView({ block: "nearest" }); }
+  finally { btn.disabled = false; btn.textContent = "Create booking"; }
+});
+
+let cb = null;
+function openCancel(b) { cb = b; $("#c_reason").value = ""; $("#c_err").hidden = true; $("#c_intro").textContent = `Booking #${b.id}: ${b.guest_name}, room ${b.room}, ${fmtDate(b.check_in)} to ${fmtDate(b.check_out)}.`; $("#cdlg").showModal(); }
+$("#c_back").onclick = () => $("#cdlg").close();
+$("#cform").addEventListener("submit", async (e) => {
+  e.preventDefault(); const btn = $("#c_submit"); btn.disabled = true; $("#c_err").hidden = true;
+  try { await api(`/api/bookings/${cb.id}/cancel`, { reason: $("#c_reason").value }); $("#cdlg").close(); toast(`Booking #${cb.id} cancelled.`); route(); }
+  catch (x) { $("#c_err").textContent = x.message; $("#c_err").hidden = false; }
+  finally { btn.disabled = false; }
+});
+
+function syncKind() {
+  const k = $("#k_kind").value, block = k === "internal_block";
+  $("#k_cat_box").hidden = block; $("#k_cat").required = !block;
+  $("#k_end").required = k !== "out_of_service";
+  $("#k_end_l").textContent = k === "out_of_service" ? "Available again on (optional)" : "Available again on *";
+}
+function openStatus() {
+  const f = $("#kform"), props = S.meta.properties; f.reset(); $("#k_err").hidden = true;
+  $("#k_prop").replaceChildren(...props.map((p) => opt(p.id, p.name, S.prop || props[0].id)));
+  $("#k_kind").replaceChildren(...S.meta.kinds.map((k) => opt(k, KIND_LABEL[k])));
+  $("#k_cat").replaceChildren(...S.meta.issues.map((x) => opt(x, x)));
+  $("#k_start").value = $("#k_start").min = S.meta.today; syncKind();
+  fillRooms($("#k_prop"), $("#k_room"), S.meta.today);
+  $("#kdlg").showModal();
+}
+$("#k_kind").addEventListener("change", syncKind);
+$("#k_prop").addEventListener("change", () => fillRooms($("#k_prop"), $("#k_room"), S.meta.today));
+$("#k_back").onclick = () => $("#kdlg").close();
+$("#kform").addEventListener("submit", async (e) => {
+  e.preventDefault(); const btn = $("#k_submit"); $("#k_err").hidden = true;
+  if (!$("#kform").reportValidity()) return;
+  btn.disabled = true;
+  try { await api("/api/room_events", Object.fromEntries(new FormData($("#kform")))); $("#kdlg").close(); toast("Room status saved."); route(); }
+  catch (x) { $("#k_err").textContent = x.message; $("#k_err").hidden = false; }
+  finally { btn.disabled = false; }
+});
+
+route();
+</script>
+</body>
+</html>

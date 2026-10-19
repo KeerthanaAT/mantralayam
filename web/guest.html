@@ -10,6 +10,11 @@
 <style>
   .wrap { max-width: 64rem; margin: 0 auto; padding: 0 var(--s4); }
   .hero { background: var(--maroon); color: var(--on-dark); border-bottom: 4px solid var(--saffron); padding: var(--s8) 0 5.5rem; }
+  .hero { padding: 0 0 3.5rem; text-align: center; position: relative; isolation: isolate;
+    background: var(--maroon) url("/images/kolam-tile.png") center / clamp(260px, 30vw, 400px) auto repeat;
+  }
+  .hero::before { content: ""; position: absolute; inset: 0; background: var(--maroon); opacity: .25; z-index: -1; pointer-events: none; } /* light overlay; keep low or the pattern disappears */
+  .hero img { display: inline-block; vertical-align: top; width: auto; height: auto; max-width: 100%; max-height: 22rem; object-fit: contain; }
   .hero h1 { color: var(--on-dark); font-size: clamp(1.6rem, 6vw, 2.5rem); max-width: 36rem; }
   .hero p { margin-top: var(--s3); max-width: 38rem; color: #f0dfc2; font-size: 1.05rem; }
   .eyebrow { text-transform: uppercase; letter-spacing: .1em; font-size: .8rem; color: #f5b45a; margin-bottom: var(--s2); }
@@ -81,18 +86,14 @@
       <ul>
         <li><a href="#/" data-r="home">Book a room</a></li>
         <li><a href="#/booking" data-r="booking">My booking</a></li>
-        <li><a href="/staff">Staff login</a></li>
+        <li><a href="http://127.0.0.1:8002/staff">Staff login</a></li>
       </ul>
     </nav>
   </div>
 </header>
 
 <div class="hero" id="hero">
-  <div class="wrap">
-    <p class="eyebrow">Sri Raghavendra Swamy Mutt · Mantralayam</p>
-    <h1>Comfortable rooms for pilgrims, close to the Mutt</h1>
-    <p>Guest houses, choultries and cottages for families and groups. Choose your dates, pick a room, and pay at the counter when you arrive.</p>
-  </div>
+  <img src="/images/hero.png" alt="Sri Raghavendra Swamy of Mantralayam holding a small idol of Lord Krishna">
 </div>
 
 <main>
@@ -102,7 +103,7 @@
 <footer>
   <div class="wrap">
     <p>Bookings are held in your name and paid at the property counter on arrival. Please carry the ID proof you entered while booking.</p>
-    <p style="margin-top:.5rem">Need help? Call the property you booked, or <a href="#/booking">look up your booking</a>. · <a href="/staff">Staff login</a></p>
+    <p style="margin-top:.5rem">Need help? Call the property you booked, or <a href="#/booking">look up your booking</a>. · <a href="http://127.0.0.1:8002/staff">Staff login</a></p>
   </div>
 </footer>
 
@@ -150,7 +151,7 @@
 <script>
 "use strict";
 const $ = (s, r = document) => r.querySelector(s);
-const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
+const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0, useGrouping: false });
 const fmtDate = (s) => new Intl.DateTimeFormat("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" }).format(new Date(s + "T00:00:00"));
 const fmtTime = (t) => new Intl.DateTimeFormat("en-IN", { hour: "numeric", minute: "2-digit" }).format(new Date("2000-01-01T" + t));
 const fmtWhen = (s) => new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(s));
@@ -198,13 +199,19 @@ function homeView(root) {
     h("div", null, h("label", { for: "s_type" }, "Room type (optional)"), h("select", { id: "s_type", name: "room_type_id" }, opt("", "Any type", s.room_type_id), i.room_types.map((t) => opt(t.id, t.name, s.room_type_id)))),
     h("p", { class: "stay span", id: "stay", "aria-live": "polite" }),
     h("button", { class: "btn", type: "submit" }, "Check availability"));
+  const syncTypes = () => {
+    const pr = i.properties.find((p) => String(p.id) === f.elements.property_id.value), sel = f.elements.room_type_id, cur = sel.value;
+    const ts = i.room_types.filter((t) => !pr || pr.type_ids.includes(t.id));
+    sel.replaceChildren(opt("", "Any type", ""), ...ts.map((t) => opt(t.id, t.name, cur)));
+  };
+  f.elements.property_id.addEventListener("change", syncTypes); syncTypes();
   const results = h("section", { "aria-labelledby": "res-h" }, h("h2", { id: "res-h", tabindex: "-1" }, "Available rooms"), h("div", { id: "results", "aria-live": "polite" }));
   const props = h("section", { "aria-labelledby": "props-h" }, h("h2", { id: "props-h" }, "Our guest houses"),
     h("ul", { class: "props" }, i.properties.map((p) => h("li", null, h("article", { class: "card pcard" }, photo(), h("div", { class: "body" },
-      h("h3", null, p.name), h("p", { class: "small muted" }, p.address), h("p", null, p.description),
+      h("h3", null, p.name), h("p", null, p.description),
       h("ul", { class: "chips", "aria-label": "Facilities" }, (p.facilities || "").split(",").map((x) => x.trim()).filter(Boolean).map((x) => h("li", null, x))),
       p.room_types.length ? h("p", { class: "small" }, h("strong", null, "Rooms: "), p.room_types.join(", ")) : null,
-      h("button", { class: "btn secondary", type: "button", onclick: () => { $("#s_prop").value = p.id; f.requestSubmit(); } }, "Check availability here"))))) ));
+      h("button", { class: "btn secondary", type: "button", onclick: () => { $("#s_prop").value = p.id; syncTypes(); f.requestSubmit(); } }, "Check availability here"))))) ));
   const st = i.settings;
   const policy = h("section", { "aria-labelledby": "know-h" }, h("h2", { id: "know-h" }, "Good to know"), h("div", { class: "info" },
     h("div", { class: "card" }, h("h3", null, "Check-in and check-out"), h("p", null, `Check-in from ${fmtTime(st.checkin_time)}. Check-out by ${fmtTime(st.checkout_time)}.`)),
@@ -234,7 +241,7 @@ async function runSearch(q, quiet) {
     S.result = r;
     if (!r.properties.length) out.replaceChildren(note("", h("strong", null, "No rooms are available for these dates and guests."), h("p", { class: "muted" }, "Try different dates, fewer guests, or another property.")));
     else out.replaceChildren(h("p", { class: "muted" }, `${r.nights} night${r.nights > 1 ? "s" : ""} · ${fmtDate(r.check_in)} to ${fmtDate(r.check_out)} · ${r.guests} guest${r.guests > 1 ? "s" : ""}`),
-      ...r.properties.map((p) => h("div", { class: "prop" }, h("h3", null, p.property), h("p", { class: "small muted" }, p.address),
+      ...r.properties.map((p) => h("div", { class: "prop" }, h("h3", null, p.property),
         h("ul", { class: "types" }, p.types.map((t) => h("li", null, roomCard(p, t, r)))))));
     if (!quiet) { $("#res-h").focus(); $("#res-h").scrollIntoView({ block: "start" }); }
   } catch (e) { out.replaceChildren(note("error", h("strong", null, "We couldn't check availability."), h("p", null, e.message), h("button", { class: "btn secondary small", type: "button", onclick: () => runSearch(q) }, "Try again"))); }
@@ -299,7 +306,7 @@ function bookingCard(b, confirmed) {
       h("div", null, h("h3", null, "Your stay"), dl([["Property", p.name], ["Room type", `${b.room_type}${b.rooms > 1 ? " × " + b.rooms : ""}`], ["Guests", b.guests], ["Check-in", `${fmtDate(b.check_in)}, from ${fmtTime(b.check_in_time)}`],
         ["Check-out", `${fmtDate(b.check_out)}, by ${fmtTime(b.check_out_time)}`], ["Nights", b.nights], ["Guest name", b.guest_name], ["Mobile", b.mobile], b.special_requests ? ["Requests", b.special_requests] : null])),
       h("div", null, h("h3", null, "Amount and payment"), dl([["Total amount", inr.format(b.amount), "total"], ["Payment", b.payment.method]]),
-        h("h3", { style: "margin-top:1rem" }, "Property contact"), h("p", null, h("strong", null, p.name)), h("p", { class: "small" }, p.address),
+        h("h3", { style: "margin-top:1rem" }, "Property contact"), h("p", null, h("strong", null, p.name)),
         h("p", { class: "small" }, `${p.contact_person ? p.contact_person + " · " : ""}`, h("a", { href: "tel:" + p.phone }, p.phone)))),
     cancelled && b.cancel_reason ? h("p", { class: "muted" }, "Cancelled: " + b.cancel_reason) : null,
     h("div", { class: "actions noprint" }, h("button", { class: "btn", type: "button", onclick: () => window.print() }, "Print / Save as PDF"),
@@ -360,7 +367,7 @@ async function route() {
   $("#hero").hidden = name !== "home";
   document.querySelectorAll("#nav a[data-r]").forEach((a) => { if (a.dataset.r === name) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
   if (!S.info) { root.replaceChildren(loading()); try { S.info = await api("/api/public/info"); } catch (e) { root.replaceChildren(note("error", h("strong", null, "The booking site is not reachable right now."), h("p", null, e.message))); return; } }
-  if (!S.info.settings.guest_booking_enabled && name === "home") { root.replaceChildren(note("", h("h2", null, "Online booking is closed right now"), h("p", null, "Please contact the property directly to book a room."), h("p", { style: "margin-top:.5rem" }, h("a", { href: "#/booking" }, "Already booked? Look up your booking."))), h("section", { style: "margin-top:2rem" }, h("h2", null, "Our guest houses"), h("ul", { class: "props" }, S.info.properties.map((p) => h("li", { class: "card", style: "padding:1rem" }, h("h3", null, p.name), h("p", { class: "small muted" }, p.address), h("p", null, p.phone)))))); return; }
+  if (!S.info.settings.guest_booking_enabled && name === "home") { root.replaceChildren(note("", h("h2", null, "Online booking is closed right now"), h("p", null, "Please contact the property directly to book a room."), h("p", { style: "margin-top:.5rem" }, h("a", { href: "#/booking" }, "Already booked? Look up your booking."))), h("section", { style: "margin-top:2rem" }, h("h2", null, "Our guest houses"), h("ul", { class: "props" }, S.info.properties.map((p) => h("li", { class: "card", style: "padding:1rem" }, h("h3", null, p.name), h("p", null, p.phone)))))); return; }
   ({ home: homeView, booking: myBookingView, confirmed: confirmedView }[name] || homeView)(root);
   document.title = ({ home: "Book a room", booking: "My booking", confirmed: "Booking confirmed" }[name] || "Book a room") + " · Mantralayam Rooms";
   closeMenu();

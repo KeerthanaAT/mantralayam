@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kolam Background</title>
+  <style>
+    body {
+      margin: 0;
+      background: #6b1d1d;
+      color: #fbf7ea;
+    }
+
+    /* Kolam tile repeats behind the portrait. Tile is only scaled uniformly (auto height). */
+    .hero {
+      background-color: #6b1d1d;
+      background-image: url("images/kolam-tile.png");   /* check this path */
+      background-repeat: repeat;
+      background-position: center;
+      background-size: clamp(260px, 30vw, 400px) auto;
+      position: relative;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      padding: clamp(16px, 4vw, 48px);
+    }
+
+    /* Light overlay only; keep this low or the pattern disappears */
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: rgba(107, 29, 29, 0.25);
+      pointer-events: none;
+    }
+
+    .hero > * { position: relative; }   /* keeps the image above the overlay */
+
+    /* The portrait: no background panel, so the pattern shows around it */
+    .hero img {
+      display: block;
+      margin: 0 auto;
+      max-width: 100%;
+      height: auto;
+    }
+  </style>
+</head>
+<body>
+
+  <section class="hero">
+    <img src="images/hero.png" alt="">   <!-- change image path here -->
+  </section>
+
+</body>
+</html>

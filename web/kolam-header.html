@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kolam Header</title>
+<style>
+  /* ---------- Settings: change image paths and colours here ---------- */
+  :root {
+    --kolam-tile: url("images/kolam-tile.png");   /* seamless background pattern */
+    --maroon: #180000;                            /* fallback / background colour */
+    --ivory: #fbf7ea;                             /* text and line colour */
+    --overlap: 3.5rem;                            /* padding below image = card overlap */
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, sans-serif; background: var(--ivory); color: var(--maroon); }
+
+  /* ---------- Header band ---------- */
+  .kolam-header {
+    position: relative;
+    isolation: isolate;                 /* keeps the overlay behind the content */
+    display: flex;
+    justify-content: center;            /* centre the image horizontally */
+    padding: 2rem 1rem var(--overlap);  /* 3.5rem strip below the image */
+    background-color: var(--maroon);
+    background-image: var(--kolam-tile);
+    background-repeat: repeat;
+    background-position: center;
+    background-size: clamp(260px, 30vw, 400px) auto;
+  }
+
+  /* Semi-transparent dark overlay: keeps the pattern subtle */
+  .kolam-header::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: rgba(24, 0, 0, 0.55);
+    z-index: -1;
+  }
+
+  /* Reference kolam: up to 22rem tall, proportions kept, shrinks only if wider than screen */
+  .kolam-header img {
+    display: block;
+    height: auto;
+    width: auto;
+    max-height: 22rem;
+    max-width: 100%;
+  }
+
+  /* ---------- Search card overlapping the strip ---------- */
+  .search-card {
+    position: relative;                 /* sits above the header's background */
+    z-index: 1;
+    max-width: 960px;
+    margin: calc(var(--overlap) * -1) auto 0;   /* margin-top: -3.5rem */
+    padding: 1.25rem;
+    background: #fff;
+    border-radius: 0.75rem;
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: 1fr;         /* mobile: stacked */
+  }
+  .search-card input, .search-card button {
+    font: inherit;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--maroon);
+    border-radius: 0.5rem;
+  }
+  .search-card button { background: var(--maroon); color: var(--ivory); cursor: pointer; }
+
+  /* Tablet and up: fields side by side */
+  @media (min-width: 640px) {
+    .search-card { grid-template-columns: 1fr 1fr; margin-inline: 1.5rem; }
+    .search-card button { grid-column: 1 / -1; }
+  }
+  /* Desktop: one row */
+  @media (min-width: 960px) {
+    .search-card { grid-template-columns: 1fr 1fr auto; margin-inline: auto; }
+    .search-card button { grid-column: auto; }
+  }
+</style>
+</head>
+<body>
+
+<header class="kolam-header">
+  <!-- Change this path to your reference kolam image -->
+  <img src="images/kolam-reference.png" alt="Kolam design">
+</header>
+
+<form class="search-card" role="search">
+  <input type="text" placeholder="Check-in date" aria-label="Check-in date">
+  <input type="text" placeholder="Guests" aria-label="Guests">
+  <button type="submit">Search</button>
+</form>
+
+</body>
+</html>

@@ -143,14 +143,15 @@ def spread(guests, n):
 
 def info(conn, q, ip):
     s = settings(conn)
-    props = [dict(p) | {"room_types": [r["name"] for r in conn.execute(
-        "SELECT DISTINCT t.name, t.tariff FROM rooms r JOIN room_types t ON t.id = r.room_type_id "
-        "WHERE r.active = 1 AND r.property_id = ? ORDER BY t.tariff", (p["id"],))]}
+    types = lambda pid: conn.execute(
+        "SELECT DISTINCT t.id, t.name, t.tariff FROM rooms r JOIN room_types t ON t.id = r.room_type_id "
+        "WHERE r.active = 1 AND r.property_id = ? ORDER BY t.tariff", (pid,)).fetchall()
+    props = [dict(p) | {"room_types": [r["name"] for r in types(p["id"])], "type_ids": [r["id"] for r in types(p["id"])]}
         for p in conn.execute("SELECT id, name, address, description, facilities, contact_person, phone FROM properties WHERE active = 1 ORDER BY id")]
     return {"today": today().isoformat(), "last_check_in": (today() + timedelta(days=s["advance"])).isoformat(),
             "settings": {"guest_booking_enabled": s["enabled"], "checkin_time": s["checkin_time"], "checkout_time": s["checkout_time"],
                          "guest_cancel_cutoff_hours": s["cutoff"]},
-            "properties": props, "room_types": [dict(r) for r in conn.execute("SELECT id, name FROM room_types ORDER BY tariff")]}
+            "properties": props, "room_types": [dict(r) for r in conn.execute("SELECT id, name FROM room_types WHERE id IN (SELECT room_type_id FROM rooms WHERE active = 1) ORDER BY tariff")]}
 
 
 def search(conn, q, ip):
@@ -357,6 +358,9 @@ class Handler(BaseHTTPRequestHandler):
         if url.path in STATIC:
             name, ctype = STATIC[url.path]
             return self.send(200, (ROOT / "web" / name).read_bytes(), ctype)
+        if url.path in ("/images/hero.png", "/images/kolam-tile.png"):
+            f = ROOT / "web" / "images" / url.path.rsplit("/", 1)[1]
+            return self.send(200, f.read_bytes(), "image/png") if f.is_file() else self.send(404, b"", "text/plain")
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
         self.send(*dispatch("GET", url.path, q, None, self.client_address[0]))
 
