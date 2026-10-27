@@ -9,8 +9,10 @@ It never reseeds data; migrate() only adds missing columns or tables. Rules live
 the HTTP handler is a thin wrapper.
 """
 import json
+import math
 import os
 import re
+import secrets
 import sqlite3
 import sys
 import time
@@ -34,13 +36,22 @@ BUSY = ("Confirmed", "Checked-In")
 
 
 class UserError(Exception):
-    def __init__(self, msg, status=400):
+    def __init__(self, msg, status=400, retry_after=None):
         super().__init__(msg)
         self.status = status
+        self.retry_after = retry_after  # seconds; sent as the Retry-After header on 429
 
 
 def today():
     return date.today()
+
+
+def now():
+    return datetime.now()
+
+
+def now_iso():
+    return now().isoformat(timespec="seconds")
 
 
 MIGRATED = set()
@@ -50,6 +61,10 @@ def migrate(conn):
     """Idempotent additive schema changes, run once per process and database file. Never drops or rewrites data."""
     if "active" not in {r[1] for r in conn.execute("PRAGMA table_info(room_types)")}:
         conn.execute("ALTER TABLE room_types ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
+    conn.execute("CREATE TABLE IF NOT EXISTS holds (id INTEGER PRIMARY KEY, token TEXT NOT NULL, room_id INTEGER NOT NULL REFERENCES rooms(id), "
+                 "check_in TEXT NOT NULL, check_out TEXT NOT NULL, expires_at TEXT NOT NULL, ip TEXT)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_holds_room ON holds(room_id, expires_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_holds_token ON holds(token)")
 
 
 def connect():
@@ -62,7 +77,7 @@ def connect():
         try:
             write(conn, lambda: migrate(conn))
         except sqlite3.OperationalError:  # another process migrated first
-            if "active" not in {r[1] for r in conn.execute("PRAGMA table_info(room_types)")}:
+            if not conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'holds'").fetchone():
                 raise
         MIGRATED.add(str(DB))
     return conn
@@ -80,12 +95,13 @@ HITS = defaultdict(deque)
 
 
 def throttle(key, limit, window, msg):
-    now, q = time.monotonic(), HITS[key]
-    while q and now - q[0] > window:
+    t, q = time.monotonic(), HITS[key]
+    while q and t - q[0] > window:
         q.popleft()
     if len(q) >= limit:
-        raise UserError(msg, 429)
-    q.append(now)
+        wait = max(1, math.ceil(q[0] + window - t))
+        raise UserError(f"{msg} Please try again in {f'{wait} seconds' if wait < 90 else f'{math.ceil(wait / 60)} minutes'}.", 429, wait)
+    q.append(t)
 
 
 def to_int(v, msg, lo, hi):
@@ -127,9 +143,14 @@ def parse_stay(conn, check_in, check_out):
     return ci, co, (co - ci).days, s
 
 
-def free_rooms(conn, ci, co, property_id=None, type_id=None):
+HOLD_MINUTES = 10
+MAX_HOLDS_PER_IP = 3  # live holds (one per room selection) a single address may keep at once
+
+
+def free_rooms(conn, ci, co, property_id=None, type_id=None, hold=None):
     """Rooms genuinely free for [ci, co): active, no overlapping live booking, no blocking status event.
     Cleaning events only block stays that start today or earlier (the room is expected back by tomorrow).
+    Unexpired guest holds block too, except the one whose token is `hold` (the caller's own).
     ponytail: that cleaning rule is inferred, confirm it with the property staff."""
     return conn.execute("""
         SELECT r.id, r.number, r.capacity, r.amenities, r.property_id, r.room_type_id,
@@ -142,8 +163,15 @@ def free_rooms(conn, ci, co, property_id=None, type_id=None):
           AND NOT EXISTS (SELECT 1 FROM room_status_events e WHERE e.room_id = r.id AND e.active = 1
                           AND e.start_date < :co AND (e.end_date IS NULL OR e.end_date > :ci)
                           AND (e.kind NOT IN ('cleaning_required', 'in_cleaning') OR :ci <= :today))
+          AND NOT EXISTS (SELECT 1 FROM holds h WHERE h.room_id = r.id AND h.expires_at > :now AND h.check_in < :co AND h.check_out > :ci
+                          AND (:hold IS NULL OR h.token != :hold))
         ORDER BY p.id, t.tariff, r.number""",
-        dict(ci=ci.isoformat(), co=co.isoformat(), pid=property_id, tid=type_id, today=today().isoformat())).fetchall()
+        dict(ci=ci.isoformat(), co=co.isoformat(), pid=property_id, tid=type_id, today=today().isoformat(), now=now_iso(), hold=hold or None)).fetchall()
+
+
+def pick_rooms(free, n, held=()):
+    """The n rooms to give a booking: the guest's own held rooms first, then the largest. ponytail: rooms of one type are near-identical, so no fancier packing."""
+    return sorted(free, key=lambda r: (r["id"] not in held, -r["capacity"], r["number"]))[:n]
 
 
 def rooms_needed(capacities, guests):
@@ -174,11 +202,11 @@ def info(conn, q, ip):
 
 
 def search(conn, q, ip):
-    throttle(("search", ip), 60, 60, "Too many searches. Please wait a minute and try again.")
+    throttle(("search", ip), 60, 60, "Too many searches.")
     ci, co, nights, s = parse_stay(conn, q.get("check_in"), q.get("check_out"))
     guests = to_int(q.get("guests"), "Number of guests must be between 1 and 200.", 1, 200)
     groups = defaultdict(list)
-    for r in free_rooms(conn, ci, co, opt_int(q.get("property_id")), opt_int(q.get("room_type_id"))):
+    for r in free_rooms(conn, ci, co, opt_int(q.get("property_id")), opt_int(q.get("room_type_id")), str(q.get("hold") or "")[:64]):
         groups[(r["property_id"], r["room_type_id"])].append(r)
     props = {}
     for (pid, tid), rooms in groups.items():
@@ -250,6 +278,11 @@ def write(conn, fn):
 
 
 def book(conn, b, ip):
+    throttle(("book-ip", ip), 10, 600, "Too many booking attempts from this device.")
+    if str(b.get("website") or "").strip():  # honeypot: the field is hidden from people, only bots fill it
+        throttle(("book-ip", ip), 10, 600, "Too many booking attempts from this device.")
+        raise UserError("Some of the values sent are not valid.")
+    token = str(b.get("hold_token") or "")[:64]
     ci, co, nights, s = parse_stay(conn, b.get("check_in"), b.get("check_out"))
     if b.get("payment_method") != "pay_at_counter":
         raise UserError("Please choose a valid payment option.")
@@ -271,16 +304,16 @@ def book(conn, b, ip):
         raise UserError("Please enter a valid email address, or leave it empty.")
     if len(remarks) > 500:
         raise UserError("Special requests must be 500 characters or fewer.")
-    throttle(("book", phone[-10:]), 5, 600, "Too many booking attempts for this mobile number. Please wait a few minutes, or call the property.")
+    throttle(("book", phone[-10:]), 5, 600, "Too many booking attempts for this mobile number.")
 
     def work():
         if not conn.execute("SELECT 1 FROM properties WHERE id = ? AND active = 1", (pid,)).fetchone():
             raise UserError("Please choose a valid property and room type.")
-        free = free_rooms(conn, ci, co, pid, tid)
+        free = free_rooms(conn, ci, co, pid, tid, token)  # the guest's own live hold does not block them; anyone else's does
         if len(free) < n:
             raise UserError("Sorry, those rooms are no longer available for your dates. Please search again.", 409)
-        # ponytail: takes the n largest free rooms of the type; rooms of one type are near-identical, so no fancier packing
-        rooms = sorted(free, key=lambda r: (-r["capacity"], r["number"]))[:n]
+        held = {r[0] for r in conn.execute("SELECT room_id FROM holds WHERE token = ? AND expires_at > ?", (token, now_iso()))} if token else set()
+        rooms = pick_rooms(free, n, held)
         shares = spread(guests, n)
         if any(sh > r["capacity"] for sh, r in zip(shares, rooms)):
             raise UserError(f"{n} room{'s' if n > 1 else ''} of this type cannot host {guests} guests. Please add a room or reduce the guests.")
@@ -292,6 +325,8 @@ def book(conn, b, ip):
                 (pid, r["id"], name, phone, b["id_type"], id_no, sh, ci.isoformat(), co.isoformat(), remarks or None, now, now, email or None, r["tariff"] * nights))
             ids.append(cur.lastrowid)
         conn.execute(f"UPDATE bookings SET group_id = ? WHERE id IN ({','.join('?' * len(ids))})", (ids[0], *ids))
+        if token:
+            conn.execute("DELETE FROM holds WHERE token = ?", (token,))
         audit(conn, "booking.online_create", pid, None, f"#{ids[0]}: {n} room(s), {ci} to {co}, {guests} guests", f"Online booking, mobile {phone}")
         return ids[0]
 
@@ -299,13 +334,45 @@ def book(conn, b, ip):
     return booking_view(conn, find_booking(conn, gid, phone))
 
 
+def hold(conn, b, ip):
+    """Reserves the chosen rooms for HOLD_MINUTES while the guest fills in the confirm step. Passing the previous `token` replaces that hold."""
+    throttle(("hold", ip), 10, 600, "Too many room selections from this device.")
+    ci, co, nights, s = parse_stay(conn, b.get("check_in"), b.get("check_out"))
+    pid = to_int(b.get("property_id"), "Please choose a valid property and room type.", 1, 10**9)
+    tid = to_int(b.get("room_type_id"), "Please choose a valid property and room type.", 1, 10**9)
+    n = to_int(b.get("rooms"), "Please choose how many rooms you need.", 1, s["max_rooms"])
+    old = str(b.get("token") or "")[:64]
+
+    def work():
+        conn.execute("DELETE FROM holds WHERE expires_at <= ?", (now_iso(),))
+        if old:
+            conn.execute("DELETE FROM holds WHERE token = ?", (old,))
+        if conn.execute("SELECT COUNT(*) FROM holds WHERE ip = ?", (ip,)).fetchone()[0] >= MAX_HOLDS_PER_IP:
+            raise UserError("You already have rooms on hold. Please finish that booking or wait for the hold to expire.", 429, HOLD_MINUTES * 60)
+        free = free_rooms(conn, ci, co, pid, tid)
+        if len(free) < n:
+            raise UserError("Sorry, those rooms are no longer available for your dates. Please search again.", 409)
+        tok, exp = secrets.token_urlsafe(16), (now() + timedelta(minutes=HOLD_MINUTES)).isoformat(timespec="seconds")
+        for r in pick_rooms(free, n):
+            conn.execute("INSERT INTO holds (token, room_id, check_in, check_out, expires_at, ip) VALUES (?,?,?,?,?,?)", (tok, r["id"], ci.isoformat(), co.isoformat(), exp, ip))
+        return {"token": tok, "expires_at": exp, "seconds": HOLD_MINUTES * 60, "rooms": n}
+    return write(conn, work)
+
+
+def release(conn, b, ip):
+    token = str(b.get("token") or "")[:64]
+    if token:
+        write(conn, lambda: conn.execute("DELETE FROM holds WHERE token = ?", (token,)))
+    return {"ok": True}
+
+
 def lookup(conn, b, ip):
-    throttle(("lookup", ip), 20, 600, "Too many attempts. Please wait a few minutes, or call the property.")
+    throttle(("lookup", ip), 20, 600, "Too many attempts.")
     return booking_view(conn, find_booking(conn, b.get("booking_id"), b.get("phone")))
 
 
 def cancel(conn, b, ip):
-    throttle(("lookup", ip), 20, 600, "Too many attempts. Please wait a few minutes, or call the property.")
+    throttle(("lookup", ip), 20, 600, "Too many attempts.")
     reason = str(b.get("reason") or "").strip()
     if not reason or len(reason) > 300:
         raise UserError("Please give a reason for cancelling (up to 300 characters).")
@@ -351,7 +418,7 @@ def backup(keep=14):
     return dest
 
 
-ROUTES = {("GET", "/health"): health, ("GET", "/api/public/info"): info, ("GET", "/api/public/search"): search, ("POST", "/api/public/book"): book,
+ROUTES = {("GET", "/health"): health, ("GET", "/api/public/info"): info, ("GET", "/api/public/search"): search, ("POST", "/api/public/book"): book, ("POST", "/api/public/hold"): hold, ("POST", "/api/public/release"): release,
           ("POST", "/api/public/booking/lookup"): lookup, ("POST", "/api/public/booking/cancel"): cancel}
 
 
@@ -365,7 +432,7 @@ def dispatch(method, path, query, body, ip):
         conn = connect()
         return 200, fn(conn, query if method == "GET" else body, ip)
     except UserError as e:
-        return e.status, {"error": str(e)}
+        return e.status, {"error": str(e)} | ({"retry_after": e.retry_after} if e.retry_after else {})
     except sqlite3.OperationalError as e:
         if "locked" in str(e) or "busy" in str(e):
             return 503, {"error": "The database is busy. Please try again."}
@@ -381,8 +448,11 @@ def dispatch(method, path, query, body, ip):
 
 class Handler(BaseHTTPRequestHandler):
     def send(self, status, data, ctype="application/json", cache=None):
+        retry = data.get("retry_after") if status == 429 and isinstance(data, dict) else None
         data = data if isinstance(data, bytes) else json.dumps(data).encode()
         self.send_response(status)
+        if retry:
+            self.send_header("Retry-After", str(retry))
         self.send_header("Content-Type", ctype + "; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Content-Security-Policy", CSP)

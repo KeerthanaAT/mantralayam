@@ -131,9 +131,149 @@ def _free(pid, t):
     return m.free_rooms(m.connect(), m.date.fromisoformat(CI), m.date.fromisoformat(CO), pid, t["room_type_id"])
 
 
+def call_ip(ip, method, path, data=None):
+    q, body = (data, None) if method == "GET" else (None, data)
+    return m.dispatch(method, path, q, body, ip)
+
+
+def test_holds_and_limits():
+    import json
+    import threading
+    import urllib.error
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+    H1, H2 = D(60), D(62)
+    stay = dict(check_in=H1, check_out=H2)
+    m.HITS.clear()
+    st, r = call_ip("1.1.1.1", "GET", "/api/public/search", dict(stay, guests=2))
+    pid, t = r["properties"][0]["property_id"], r["properties"][0]["types"][0]
+    sel = dict(stay, property_id=pid, room_type_id=t["room_type_id"], rooms=1)
+
+    def free(hold=None):
+        conn = m.connect()
+        try:
+            return len(m.free_rooms(conn, m.date.fromisoformat(H1), m.date.fromisoformat(H2), pid, t["room_type_id"], hold))
+        finally:
+            conn.close()
+
+    def book_for(ip, **kw):
+        m.HITS.clear()
+        N[0] += 1
+        return call_ip(ip, "POST", "/api/public/book", dict(guest_name="Racer", phone=f"97654{N[0]:05d}", id_type="Aadhaar", id_number="1234",
+                                                              payment_method="pay_at_counter", guests=1, **sel, **kw))
+
+    # sell the type down to exactly one room
+    while free() > 1:
+        assert book_for("9.9.9.9")[0] == 200
+    assert free() == 1
+
+    # two guests race for the last room: the first hold wins, the second cannot hold or book it
+    m.HITS.clear()
+    st, a = call_ip("1.1.1.1", "POST", "/api/public/hold", sel)
+    assert st == 200 and a["seconds"] == 600 and a["rooms"] == 1, a
+    assert free() == 0 and free(a["token"]) == 1  # held rooms are unavailable to everyone else, not to the holder
+    m.HITS.clear()
+    st, r = call_ip("2.2.2.2", "POST", "/api/public/hold", sel)
+    assert st == 409 and "no longer available" in r["error"], r
+    assert book_for("2.2.2.2")[0] == 409
+    assert book_for("2.2.2.2", hold_token="not-the-token")[0] == 409
+    q = dict(stay, guests=1, property_id=pid, room_type_id=t["room_type_id"])
+    assert not call_ip("2.2.2.2", "GET", "/api/public/search", q)[1]["properties"]
+    assert call_ip("1.1.1.1", "GET", "/api/public/search", q | {"hold": a["token"]})[1]["properties"], "the holder still sees their own room"
+    # the holder books; the hold is consumed
+    st, b = book_for("1.1.1.1", hold_token=a["token"])
+    assert st == 200 and b["status"] == "Confirmed", b
+    db = sqlite3.connect(m.DB)
+    assert db.execute("SELECT COUNT(*) FROM holds WHERE token = ?", (a["token"],)).fetchone()[0] == 0
+    call("POST", "/api/public/booking/cancel", dict(booking_id=b["booking_id"], phone=b["mobile"], reason="test"))
+    assert free() == 1
+
+    # hold expiry: after 10 minutes the room is free again, with no cleanup job needed
+    m.HITS.clear()
+    st, a = call_ip("1.1.1.1", "POST", "/api/public/hold", sel)
+    assert st == 200 and free() == 0
+    real_now = m.now
+    m.now = lambda: real_now() + timedelta(minutes=m.HOLD_MINUTES, seconds=5)
+    try:
+        assert free() == 1
+        st, b = book_for("2.2.2.2")
+        assert st == 200, b  # the second guest gets it once the hold has lapsed
+    finally:
+        m.now = real_now
+    call("POST", "/api/public/booking/cancel", dict(booking_id=b["booking_id"], phone=b["mobile"], reason="test"))
+    m.HITS.clear()
+    db.execute("DELETE FROM holds"); db.commit()
+
+    # release frees it at once; re-holding with the old token replaces rather than stacks
+    st, a1 = call_ip("3.3.3.3", "POST", "/api/public/hold", sel)
+    assert st == 200 and free() == 0
+    m.HITS.clear()
+    st, a2 = call_ip("3.3.3.3", "POST", "/api/public/hold", sel | {"token": a1["token"]})
+    assert st == 200 and db.execute("SELECT COUNT(DISTINCT token) FROM holds WHERE ip = '3.3.3.3'").fetchone()[0] == 1
+    assert call_ip("3.3.3.3", "POST", "/api/public/release", {"token": a2["token"]})[0] == 200 and free() == 1
+
+    # one address cannot lock up the whole property
+    cap = m.MAX_HOLDS_PER_IP
+    st, r = call_ip("4.4.4.4", "GET", "/api/public/search", dict(check_in=D(70), check_out=D(71), guests=1))
+    big = max(((p["property_id"], x) for p in r["properties"] for x in p["types"]), key=lambda px: px[1]["can_book"])
+    osel = dict(check_in=D(70), check_out=D(71), property_id=big[0], room_type_id=big[1]["room_type_id"], rooms=1)
+    assert big[1]["can_book"] >= 3, "test data needs a room type with several free rooms"
+    cap = min(cap, 3)
+    m.MAX_HOLDS_PER_IP = cap
+    try:
+        for _ in range(cap):
+            m.HITS.clear()
+            assert call_ip("5.5.5.5", "POST", "/api/public/hold", osel)[0] == 200
+        m.HITS.clear()
+        st, r = call_ip("5.5.5.5", "POST", "/api/public/hold", osel)
+        assert st == 429 and r["retry_after"] > 0, r
+    finally:
+        m.MAX_HOLDS_PER_IP = 3
+    db.execute("DELETE FROM holds"); db.commit()
+
+    # honeypot: a filled hidden field is refused and nothing is booked
+    before = db.execute("SELECT COUNT(*) FROM bookings").fetchone()[0]
+    st, r = book_for("6.6.6.6", website="http://spam.example")
+    assert st == 400 and db.execute("SELECT COUNT(*) FROM bookings").fetchone()[0] == before, r
+
+    # rate limits per IP: 429 with a wait time, and a Retry-After header over real HTTP
+    m.HITS.clear()
+    codes = [call_ip("7.7.7.7", "GET", "/api/public/search", dict(stay, guests=1))[0] for _ in range(61)]
+    assert codes[:60] == [200] * 60 and codes[60] == 429
+    st, r = call_ip("7.7.7.7", "GET", "/api/public/search", dict(stay, guests=1))
+    assert st == 429 and 1 <= r["retry_after"] <= 60 and "try again in" in r["error"], r
+    assert call_ip("8.8.8.8", "GET", "/api/public/search", dict(stay, guests=1))[0] == 200  # other addresses are unaffected
+    m.HITS.clear()
+    assert [call_ip("7.7.7.7", "POST", "/api/public/book", {})[0] for _ in range(11)][-1] == 429
+    m.HITS.clear()
+    assert [call_ip("7.7.7.7", "POST", "/api/public/booking/lookup", dict(booking_id=1, phone="9000000000"))[0] for _ in range(21)][-1] == 429
+    m.HITS.clear()
+    assert [call_ip("7.7.7.7", "POST", "/api/public/booking/cancel", dict(booking_id=1, phone="9000000000", reason="x"))[0] for _ in range(21)][-1] == 429
+    m.Handler.log_message = lambda *a: None
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), m.Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        m.HITS.clear()
+        last = None
+        for _ in range(21):
+            req = urllib.request.Request(f"http://127.0.0.1:{srv.server_port}/api/public/booking/lookup", json.dumps(dict(booking_id=1, phone="9000000000")).encode(),
+                                         {"Content-Type": "application/json"})
+            try:
+                urllib.request.urlopen(req)
+            except urllib.error.HTTPError as e:
+                last = e
+        assert last.code == 429 and int(last.headers["Retry-After"]) > 0, last.headers
+        assert json.loads(last.read())["retry_after"] == int(last.headers["Retry-After"])
+    finally:
+        srv.shutdown()
+    m.HITS.clear()
+    db.close()
+
+
 if __name__ == "__main__":
     try:
         test_health_and_backup()
+        test_holds_and_limits()
         test_all()
         print("ok")
     finally:

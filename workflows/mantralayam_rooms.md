@@ -31,11 +31,13 @@ python tools/test_mantralayam_rooms.py             # prints "ok"; runs on a COPY
 | GET `/images/<file>` | any png/jpg/webp/svg/ico in `web/images/` (no allowlist to edit; other types and path tricks give 404) |
 | GET `/api/public/info` | properties, room types, settings, today |
 | GET `/api/public/search?check_in&check_out&guests[&property_id&room_type_id]` | free room types grouped by property, with rooms needed for the party |
-| POST `/api/public/book` | creates a booking (1 to 3 rooms of one type); returns the booking view |
+| POST `/api/public/hold` `{property_id, room_type_id, rooms, check_in, check_out[, token]}` | holds the rooms for 10 minutes; returns `{token, expires_at, seconds, rooms}`. Passing the previous `token` replaces that hold |
+| POST `/api/public/release` `{token}` | frees a hold at once |
+| POST `/api/public/book` | creates a booking (1 to 3 rooms of one type); optional `hold_token` books the held rooms; a filled `website` field (honeypot) is refused; returns the booking view |
 | POST `/api/public/booking/lookup` `{booking_id, phone}` | view a booking |
 | POST `/api/public/booking/cancel` `{booking_id, phone, reason}` | cancel before the cutoff |
 
-Errors return `{"error": "<message for the guest>"}` with 400, 403 (online booking off), 404, 409 (room taken, cannot cancel), 429 (rate limit) or 5xx.
+Errors return `{"error": "<message for the guest>"}` with 400, 403 (online booking off), 404, 409 (room taken, cannot cancel), 429 (rate limit) or 5xx. A 429 also carries `retry_after` (seconds) in the body and as the `Retry-After` header, and the message says how long to wait.
 
 ## Rules
 - A room is free for `[check_in, check_out)` if it and its property are active, no `Confirmed` or `Checked-In` booking overlaps, and no active `room_status_event` overlaps (open-ended events block indefinitely). Same-day turnover is allowed.
@@ -46,7 +48,9 @@ Errors return `{"error": "<message for the guest>"}` with 400, 403 (online booki
 - Booking ID plus mobile number (last 10 digits compared) is the only credential for lookup and cancel.
 - Cancelling is allowed while status is `Confirmed` and now is before check-in time minus the cutoff hours. Cancellation reason is mandatory.
 - Every online create and cancel writes an `audit_log` row (`booking.online_create`, `booking.online_cancel`, user `guest`).
-- In-memory rate limits: 60 searches per minute and 20 lookups or cancels per 10 minutes per IP, 5 bookings per 10 minutes per mobile number.
+- In-memory rate limits per IP: 60 searches per minute, 10 hold requests and 10 booking attempts per 10 minutes, 20 lookups or cancels per 10 minutes; plus 5 bookings per 10 minutes per mobile number. They reset on restart.
+- Holds: table `holds` (token, room, dates, `expires_at`, ip). `free_rooms()` treats an unexpired hold as unavailable to everyone except the holder's own token, so the booking transaction (`BEGIN IMMEDIATE`) still decides every race and double-booking stays impossible. Expired rows are ignored by the query and swept on the next hold; no background job. One IP may keep at most 3 live holds (429 after that). The guest page takes the hold when the confirm dialog opens, shows a countdown, re-holds when the room count changes, releases on close or page exit, and the booking consumes it. Staff walk-in booking is refused for a held room with a message saying it is held until HH:MM.
+- Honeypot: the hidden, `inert` field `website` in the booking form. A bot that fills it gets a generic 400, counts double against its IP limit, and no booking is created.
 
 ## Edge cases
 - Dates: valid ISO, not in the past, check-out after check-in, within the advance window and night limit.

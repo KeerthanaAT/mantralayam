@@ -133,6 +133,8 @@
   <form id="bform">
     <h2 id="bdlg-h">Confirm your booking</h2>
     <div class="summary"><dl class="facts" id="bsum"></dl></div>
+    <p class="msg" id="b_hold"></p>
+    <span id="b_holdlive" role="status" aria-live="polite" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden"></span>
     <div class="row">
       <div><label for="b_rooms" class="req">Number of rooms</label><select id="b_rooms" name="rooms" required></select></div>
       <div><label for="b_guests" class="req">Number of guests</label><input id="b_guests" name="guests" type="number" min="1" max="200" required inputmode="numeric"></div>
@@ -148,6 +150,7 @@
       <div><label for="b_idno" class="req">ID proof number</label><input id="b_idno" name="id_number" required maxlength="30" autocomplete="off"></div>
     </div>
     <div><label for="b_req">Special requests (optional)</label><textarea id="b_req" name="remarks" maxlength="500" placeholder="For example: ground floor, elderly guests"></textarea></div>
+    <div inert style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden"><label for="b_website">Website (leave this empty)</label><input id="b_website" name="website" tabindex="-1" autocomplete="off"></div>
     <p class="msg"><strong>Pay at counter on arrival.</strong> Nothing is charged online.</p>
     <p id="b_err" class="msg error" role="alert" hidden></p>
     <div class="foot">
@@ -286,10 +289,43 @@ function roomCard(p, t, r) {
 
 // ---------- booking dialog ----------
 let bctx = null;
-function openBook(p, t, r, opener) {
+// ---------- room hold: the chosen rooms are reserved for 10 minutes while the guest fills in the form ----------
+const HOLD = { token: null, until: 0, timer: null, warned: false };
+const mmss = (ms) => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+function stopHold(release) {
+  clearInterval(HOLD.timer);
+  if (release && HOLD.token) api("/api/public/release", { token: HOLD.token }).catch(() => {});
+  HOLD.token = HOLD.timer = null;
+}
+async function takeHold() {
+  const { p, t, r } = bctx;
+  const d = await api("/api/public/hold", { property_id: p.property_id, room_type_id: t.room_type_id, check_in: r.check_in, check_out: r.check_out, rooms: +$("#b_rooms").value || 1, token: HOLD.token });
+  clearInterval(HOLD.timer);
+  HOLD.token = d.token; HOLD.until = Date.now() + d.seconds * 1000; HOLD.warned = false;
+  const tick = () => {
+    const left = HOLD.until - Date.now();
+    if (left <= 0) {
+      clearInterval(HOLD.timer); HOLD.token = null;
+      $("#b_hold").textContent = "Your 10-minute hold has ended. You can still confirm: we will check the rooms are free.";
+      $("#b_holdlive").textContent = "Your room hold has ended."; return;
+    }
+    $("#b_hold").textContent = `These rooms are held for you for ${mmss(left)}.`;
+    if (left <= 120000 && !HOLD.warned) { HOLD.warned = true; $("#b_holdlive").textContent = "Your room hold ends in 2 minutes."; }
+  };
+  $("#b_holdlive").textContent = "Rooms are held for you for 10 minutes.";
+  tick(); HOLD.timer = setInterval(tick, 1000);
+}
+window.addEventListener("pagehide", () => { if (HOLD.token) navigator.sendBeacon("/api/public/release", new Blob([JSON.stringify({ token: HOLD.token })], { type: "application/json" })); });
+
+async function openBook(p, t, r, opener) {
   bctx = { p, t, r, opener };
   const rooms = $("#b_rooms");
   rooms.replaceChildren(...Array.from({ length: t.can_book }, (_, i) => h("option", { value: i + 1, selected: i + 1 === Math.min(t.rooms_needed, t.can_book) }, i + 1)));
+  bctx.n = +rooms.value;
+  opener.disabled = true;
+  try { await takeHold(); }
+  catch (x) { toast(x.message); if (/no longer available/i.test(x.message)) runSearch(S.search, true); return; }
+  finally { opener.disabled = false; }
   $("#b_idtype").replaceChildren(...ID_TYPES.map((x) => h("option", { value: x }, x)));
   $("#b_guests").value = r.guests; $("#b_err").hidden = true;
   updateSummary(); $("#bdlg").showModal();
@@ -302,18 +338,22 @@ function updateSummary() {
     ["Check-out", `${fmtDate(r.check_out)}, by ${fmtTime(st.checkout_time)}`], ["Nights", r.nights], ["Rooms", `${n} × ${inr.format(t.tariff)} per night`],
     ["Total amount", inr.format(n * t.total_per_room), "total"]]).children);
 }
-$("#b_rooms").addEventListener("change", updateSummary);
+$("#b_rooms").addEventListener("change", async () => {
+  updateSummary();
+  try { await takeHold(); $("#b_err").hidden = true; bctx.n = +$("#b_rooms").value; }
+  catch (x) { $("#b_err").textContent = x.message; $("#b_err").hidden = false; $("#b_rooms").value = bctx.n; updateSummary(); }  // the earlier hold is kept
+});
 $("#b_back").onclick = () => $("#bdlg").close();
-$("#bdlg").addEventListener("close", () => { if (bctx?.opener?.isConnected) bctx.opener.focus(); });
+$("#bdlg").addEventListener("close", () => { stopHold(true); if (bctx?.opener?.isConnected) bctx.opener.focus(); });
 $("#bform").addEventListener("submit", async (e) => {
   e.preventDefault();
   const { p, t, r } = bctx, btn = $("#b_submit"), err = $("#b_err");
   err.hidden = true; btn.disabled = true; btn.textContent = "Booking…";
   const v = Object.fromEntries(new FormData($("#bform")));
   try {
-    const b = await api("/api/public/book", { ...v, property_id: p.property_id, room_type_id: t.room_type_id, check_in: r.check_in, check_out: r.check_out, payment_method: "pay_at_counter" });
+    const b = await api("/api/public/book", { ...v, property_id: p.property_id, room_type_id: t.room_type_id, check_in: r.check_in, check_out: r.check_out, payment_method: "pay_at_counter", hold_token: HOLD.token });
     S.last = b; try { sessionStorage.setItem("last", JSON.stringify({ id: b.booking_id, phone: v.phone })); } catch {}
-    bctx.opener = null; $("#bdlg").close(); $("#bform").reset(); location.hash = "#/confirmed";
+    stopHold(false); bctx.opener = null; $("#bdlg").close(); $("#bform").reset(); location.hash = "#/confirmed";
   } catch (x) {
     err.textContent = x.message; err.hidden = false; err.scrollIntoView({ block: "nearest" });
     if (/no longer available/i.test(x.message)) runSearch(S.search, true);

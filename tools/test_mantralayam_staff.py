@@ -325,10 +325,29 @@ def test_admin():
     db.close()
 
 
+def test_hold_blocks_walkin():
+    db = sqlite3.connect(g.DB)
+    h, salt = s.make_hash(PW)
+    db.execute("UPDATE users SET pw_hash = ?, salt = ?, active = 1", (h, salt)); db.commit()
+    s.FAILS.clear()
+    assert login("frontdesk")[0] == 200
+    room = free_room("frontdesk")
+    stay = dict(check_in=D(50), check_out=D(51))
+    exp = (g.now() + timedelta(minutes=10)).isoformat(timespec="seconds")
+    db.execute("INSERT INTO holds (token, room_id, check_in, check_out, expires_at, ip) VALUES ('t', ?, ?, ?, ?, '1.1.1.1')", (room["id"], stay["check_in"], stay["check_out"], exp))
+    db.commit()
+    st, out = call("frontdesk", "POST", "/api/bookings", guest(room, **stay))
+    assert st == 409 and "held for a guest who is booking online" in out["error"], out
+    db.execute("DELETE FROM holds"); db.commit()
+    assert call("frontdesk", "POST", "/api/bookings", guest(room, **stay))[0] == 200
+    db.close()
+
+
 if __name__ == "__main__":
     try:
         test_all()
         test_admin()
+        test_hold_blocks_walkin()
         print("ok")
     finally:
         shutil.rmtree(TMP, ignore_errors=True)

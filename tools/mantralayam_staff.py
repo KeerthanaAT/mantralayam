@@ -250,7 +250,12 @@ def why_not_free(conn, room, ci, co):
     if b:
         return f"Room {room['number']} is already booked (booking #{b['id']}, {b['check_in']} to {b['check_out']}). Choose different dates or another room."
     e = conn.execute("SELECT kind FROM room_status_events WHERE room_id = ? AND active = 1 AND start_date < ? AND (end_date IS NULL OR end_date > ?)", (room["id"], co, ci)).fetchone()
-    return f"Room {room['number']} is {LABEL[e['kind']]} for those dates. Choose different dates or another room." if e else f"Room {room['number']} is not available."
+    if e:
+        return f"Room {room['number']} is {LABEL[e['kind']]} for those dates. Choose different dates or another room."
+    h = conn.execute("SELECT expires_at FROM holds WHERE room_id = ? AND expires_at > ? AND check_in < ? AND check_out > ?", (room["id"], g.now_iso(), co, ci)).fetchone()
+    if h:
+        return f"Room {room['number']} is held for a guest who is booking online, until {h['expires_at'][11:16]}. Try again after that or choose another room."
+    return f"Room {room['number']} is not available."
 
 
 def create_booking(conn, c):
