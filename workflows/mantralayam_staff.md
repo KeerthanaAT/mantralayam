@@ -8,7 +8,7 @@ Give property staff a sign-in app to run daily operations: see today's arrivals 
 |------|-------|
 | Staff server `tools/mantralayam_staff.py` (port 8002) | done, tested |
 | Staff UI `web/staff.html` + `web/staff.css` | done, checked in a real browser at 1280px and 390px |
-| Admin screens: properties, room types, rooms, users, settings | **not built** (edit the database or add later) |
+| Admin screens: properties, room types, rooms, users, settings (page `Admin`, super_admin only) | done, tested, checked at 1280px and 390px |
 | Guest site (port 8001) | locked and untouched, see `workflows/mantralayam_rooms.md` |
 
 ## Isolation from the guest site
@@ -85,3 +85,13 @@ Dropped from the original menu request because the data has no such concept: Ser
 ## Lessons learned (menu work)
 - 2026-10-20: `tools/test_mantralayam_rooms.py` fails against today's live database (it expects zero online bookings). `test_mantralayam_staff.py` copies the live DB too, so old blocks on rooms can leak into it; the cleaning-event check now filters to cleaning kinds.
 - 2026-10-20: a `position: sticky` header always forms its own stacking context; to keep the burger visible above the drawer the header itself sits above the drawer (z-index 50 vs 40).
+
+## Admin screens (super_admin only)
+Page `Admin` (`#/admin`), routes under `/api/admin/*`, every route role-checked on the server (managers get 403) and audited (`admin.property_create/edit`, `admin.room_create/edit`, `admin.user_create/edit`, `admin.<thing>_activate/deactivate`, `admin.settings`, `rate.create/edit`).
+- Properties, room types, rooms and users can be created, edited and **deactivated, never deleted**. Reactivating is always allowed.
+- Deactivating a property, room type or room is refused (409) while it has a Confirmed booking that has not ended or a Checked-In booking. A room's type also cannot change while it has such bookings, and a room cannot move to another property.
+- Inactive room types and properties disappear from the guest site and cannot be chosen for new rooms or user assignments.
+- Users: username unique (case-insensitive), password 8 to 200 characters, role from the `roles` table, at least one active property unless `super_admin` (who sees all). A password reset signs that user out everywhere. You cannot demote or deactivate yourself.
+- Settings keys: `guest_booking_enabled`, `guest_max_rooms` (1-20), `guest_advance_days` (1-730), `guest_max_nights` (1-60), `guest_cancel_cutoff_hours` (0-168), `checkin_time`, `checkout_time`. Changes are audited as old to new.
+- `room_types.active` did not exist in the original database; `migrate()` in `mantralayam_rooms.py` adds it (default 1) the first time any server connects.
+- Lesson 2026-10-28: `can` in `/api/meta` now has an `admin` key; tests that compare the whole dict must include it.

@@ -132,7 +132,7 @@ def meta(conn, c):
         "properties": [dict(r) for r in conn.execute(f"SELECT id, name FROM properties WHERE id IN ({marks(u['props'])}) ORDER BY id", u["props"])],
         "room_types": [dict(r) for r in conn.execute("SELECT id, name FROM room_types ORDER BY tariff")],
         "id_types": list(g.ID_TYPES), "issues": list(ISSUES), "kinds": list(KINDS),
-        "can": {"book": u["role"] in DESK, "status": u["role"] in DESK, "clean": u["role"] in CLEANERS, "audit": u["role"] in MGR},
+        "can": {"book": u["role"] in DESK, "status": u["role"] in DESK, "clean": u["role"] in CLEANERS, "audit": u["role"] in MGR, "admin": u["role"] == "super_admin"},
         "pages": [{"key": k, "label": l} for k, l, roles in PAGES if u["role"] in roles]}
 
 
@@ -419,7 +419,7 @@ def audit_view(conn, c):
 FRONT = DESK | {"viewer"}  # everyone who may see guest details
 PAGES = [("today", "Dashboard", ALL), ("bookings", "Bookings", FRONT), ("calendar", "Calendar", FRONT), ("rooms", "Rooms", ALL),
          ("status", "Room status", ALL), ("guests", "Guests", FRONT), ("rates", "Rooms & rates", MGR), ("reports", "Reports", MGR),
-         ("notifications", "Notifications", ALL), ("audit", "Audit log", MGR), ("settings", "Settings", ALL)]
+         ("notifications", "Notifications", ALL), ("audit", "Audit log", MGR), ("admin", "Admin", frozenset({"super_admin"})), ("settings", "Settings", ALL)]
 STATUS_LIVE = ("Confirmed", "Checked-In", "Checked-Out")
 
 
@@ -729,6 +729,189 @@ def password_change(conn, c):
     return {"ok": True}
 
 
+# ---------- admin screens (super_admin only) ----------
+SUPER = frozenset({"super_admin"})
+SETTING_RANGES = {"guest_max_rooms": (1, 20, "Most rooms per online booking"), "guest_advance_days": (1, 730, "Days ahead guests can book"),
+                  "guest_max_nights": (1, 60, "Most nights per online booking"), "guest_cancel_cutoff_hours": (0, 168, "Cancellation cutoff (hours)")}
+TIME_RE = r"([01]\d|2[0-3]):[0-5]\d"
+LIVE_SQL = "status IN ('Confirmed', 'Checked-In') AND (check_out > :today OR status = 'Checked-In')"
+FUTURE_SQL = {"rooms": f"SELECT COUNT(*) FROM bookings WHERE room_id = :id AND {LIVE_SQL}",
+              "room_types": f"SELECT COUNT(*) FROM bookings WHERE room_id IN (SELECT id FROM rooms WHERE room_type_id = :id) AND {LIVE_SQL}",
+              "properties": f"SELECT COUNT(*) FROM bookings WHERE property_id = :id AND {LIVE_SQL}"}
+ACTIVE_LABEL = {"properties": "property", "room_types": "room type", "rooms": "room", "users": "user"}
+
+
+def raw_settings(conn):
+    return g.DEFAULTS | {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM settings") if r["key"] in g.DEFAULTS}
+
+
+def admin_data(conn, c):
+    q = lambda sql: [dict(r) for r in conn.execute(sql)]
+    users = q("SELECT id, username, full_name, role, active FROM users ORDER BY id")
+    for u in users:
+        u["property_ids"] = [r[0] for r in conn.execute("SELECT property_id FROM user_properties WHERE user_id = ? ORDER BY 1", (u["id"],))]
+    return {"properties": q("SELECT * FROM properties ORDER BY id"), "room_types": q("SELECT * FROM room_types ORDER BY tariff"),
+            "rooms": q("SELECT r.*, p.name AS property, t.name AS type FROM rooms r JOIN properties p ON p.id = r.property_id JOIN room_types t ON t.id = r.room_type_id ORDER BY r.property_id, r.number"),
+            "users": users, "roles": q("SELECT name, label FROM roles ORDER BY rowid"), "settings": raw_settings(conn),
+            "setting_ranges": {k: list(v) for k, v in SETTING_RANGES.items()}}
+
+
+def exists(conn, table, id_, active_only=False):
+    return conn.execute(f"SELECT 1 FROM {table} WHERE id = ?" + (" AND active = 1" if active_only else ""), (id_,)).fetchone()
+
+
+def admin_property(conn, c):
+    b = c.body
+    name = text(b, "name", "Name", 1, 100)
+    vals = [text(b, k, k.replace("_", " ").capitalize(), 0, n) or None for k, n in (("address", 300), ("contact_person", 100), ("phone", 30), ("description", 1000), ("facilities", 1000))]
+    if vals[2] and not re.fullmatch(r"[\d\s+\-]{6,30}", vals[2]):
+        raise UserError("Phone may contain only digits, spaces, + and -.")
+    pid = g.opt_int(b.get("id"))
+
+    def work():
+        if conn.execute("SELECT 1 FROM properties WHERE name = ? AND id IS NOT ?", (name, pid)).fetchone():
+            raise UserError("A property with that name already exists.", 409)
+        if pid:
+            if not exists(conn, "properties", pid):
+                raise UserError("Property not found.", 404)
+            conn.execute("UPDATE properties SET name = ?, address = ?, contact_person = ?, phone = ?, description = ?, facilities = ? WHERE id = ?", (name, *vals, pid))
+            new = pid
+        else:
+            new = conn.execute("INSERT INTO properties (name, address, contact_person, phone, description, facilities) VALUES (?,?,?,?,?,?)", (name, *vals)).lastrowid
+        audit(conn, c.user, "admin.property_edit" if pid else "admin.property_create", new, None, None, name)
+        return new
+    return {"id": g.write(conn, work)}
+
+
+def admin_room(conn, c):
+    b, rid = c.body, g.opt_int(c.body.get("id"))
+    number, amenities = text(b, "number", "Room number", 1, 20), text(b, "amenities", "Amenities", 0, 300) or None
+    floor = g.to_int(b.get("floor", 0), "Floor must be a whole number from -5 to 200.", -5, 200)
+    cap = g.to_int(b.get("capacity"), "Capacity must be between 1 and 100.", 1, 100)
+    tid = g.to_int(b.get("room_type_id"), "Please choose a room type.", 1, 10**9)
+    pid = g.to_int(b.get("property_id"), "Please choose a property.", 1, 10**9)
+
+    def work():
+        old = conn.execute("SELECT * FROM rooms WHERE id = ?", (rid,)).fetchone() if rid else None
+        if rid and not old:
+            raise UserError("Room not found.", 404)
+        if old and old["property_id"] != pid:
+            raise UserError("A room cannot move to another property.")
+        if not exists(conn, "properties", pid, True) or not exists(conn, "room_types", tid, True):
+            raise UserError("Please choose an active property and room type.")
+        if conn.execute("SELECT 1 FROM rooms WHERE property_id = ? AND number = ? AND id IS NOT ?", (pid, number, rid)).fetchone():
+            raise UserError("That property already has a room with this number.", 409)
+        if old and old["room_type_id"] != tid and conn.execute(FUTURE_SQL["rooms"], dict(id=rid, today=g.today().isoformat())).fetchone()[0]:
+            raise UserError("This room has current or future bookings, so its room type cannot change.", 409)
+        if rid:
+            conn.execute("UPDATE rooms SET number = ?, floor = ?, room_type_id = ?, capacity = ?, amenities = ? WHERE id = ?", (number, floor, tid, cap, amenities, rid))
+            new = rid
+        else:
+            new = conn.execute("INSERT INTO rooms (property_id, number, floor, room_type_id, capacity, amenities) VALUES (?,?,?,?,?,?)", (pid, number, floor, tid, cap, amenities)).lastrowid
+        audit(conn, c.user, "admin.room_edit" if rid else "admin.room_create", pid, new, None, f"room {number}, sleeps {cap}")
+        return new
+    return {"id": g.write(conn, work)}
+
+
+def admin_user(conn, c):
+    b, uid = c.body, g.opt_int(c.body.get("id"))
+    username, name = text(b, "username", "Username", 3, 40), text(b, "full_name", "Full name", 1, 100)
+    if not re.fullmatch(r"[A-Za-z0-9_.\-]+", username):
+        raise UserError("Username may contain only letters, digits, dot, dash and underscore.")
+    pw = str(b.get("password") or "")
+    if (not uid or pw) and not 8 <= len(pw) <= 200:
+        raise UserError("The password must be 8 to 200 characters.")
+    ids = b.get("property_ids") or []
+    if not isinstance(ids, list):
+        raise UserError("Please choose properties from the list.")
+    ids = sorted({g.to_int(i, "Please choose properties from the list.", 1, 10**9) for i in ids})
+
+    def work():
+        role = b.get("role")
+        if role not in {r[0] for r in conn.execute("SELECT name FROM roles")}:
+            raise UserError("Please choose a valid role.")
+        old = conn.execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone() if uid else None
+        if uid and not old:
+            raise UserError("User not found.", 404)
+        if uid == c.user["id"] and role != "super_admin":
+            raise UserError("You cannot remove your own super admin role.", 409)
+        if conn.execute("SELECT 1 FROM users WHERE username = ? COLLATE NOCASE AND id IS NOT ?", (username, uid)).fetchone():
+            raise UserError("That username is already taken.", 409)
+        if role != "super_admin" and not ids:
+            raise UserError("Please assign at least one property to this user.")
+        if any(not exists(conn, "properties", i, True) for i in ids):
+            raise UserError("Please choose active properties only.")
+        if uid:
+            conn.execute("UPDATE users SET username = ?, full_name = ?, role = ? WHERE id = ?", (username, name, role, uid))
+            if pw:
+                h, salt = make_hash(pw)
+                conn.execute("UPDATE users SET pw_hash = ?, salt = ? WHERE id = ?", (h, salt, uid))
+            new = uid
+        else:
+            h, salt = make_hash(pw)
+            new = conn.execute("INSERT INTO users (username, full_name, role, pw_hash, salt) VALUES (?,?,?,?,?)", (username, name, role, h, salt)).lastrowid
+        conn.execute("DELETE FROM user_properties WHERE user_id = ?", (new,))
+        if role != "super_admin":
+            conn.executemany("INSERT INTO user_properties (user_id, property_id) VALUES (?,?)", [(new, i) for i in ids])
+        audit(conn, c.user, "admin.user_edit" if uid else "admin.user_create", None, None, old and old["role"], f"{username} ({role})",
+              "password reset" if uid and pw else None)
+        return new
+    new = g.write(conn, work)
+    if uid and pw and uid != c.user["id"]:
+        for t in [t for t, v in SESSIONS.items() if v[0] == uid]:
+            SESSIONS.pop(t, None)  # a reset password signs that user out everywhere
+    return {"id": new}
+
+
+def admin_active(conn, c):
+    kind, id_ = c.args["kind"], int(c.args["id"])
+    on = c.body.get("active")
+    if not isinstance(on, bool):
+        raise UserError("Some of the values sent are not valid.")
+
+    def work():
+        r = conn.execute(f"SELECT * FROM {kind} WHERE id = ?", (id_,)).fetchone()
+        if not r:
+            raise UserError("Not found.", 404)
+        if not on:
+            if kind == "users" and id_ == c.user["id"]:
+                raise UserError("You cannot deactivate your own account.", 409)
+            n = conn.execute(FUTURE_SQL[kind], dict(id=id_, today=g.today().isoformat())).fetchone()[0] if kind in FUTURE_SQL else 0
+            if n:
+                raise UserError(f"This {ACTIVE_LABEL[kind]} has {n} current or future booking(s), so it cannot be deactivated. Move or cancel them first.", 409)
+        conn.execute(f"UPDATE {kind} SET active = ? WHERE id = ?", (int(on), id_))
+        label = r["name"] if "name" in r.keys() else r["username"] if "username" in r.keys() else f"room {r['number']}"
+        audit(conn, c.user, f"admin.{ACTIVE_LABEL[kind].replace(' ', '_')}_{'activate' if on else 'deactivate'}",
+              r["property_id"] if kind == "rooms" else id_ if kind == "properties" else None, id_ if kind == "rooms" else None, None, label)
+    g.write(conn, work)
+    return {"ok": True}
+
+
+def admin_settings(conn, c):
+    b, new = c.body, {}
+    for k, (lo, hi, label) in SETTING_RANGES.items():
+        if k in b:
+            new[k] = str(g.to_int(b[k], f"{label} must be a whole number from {lo} to {hi}.", lo, hi))
+    for k in ("checkin_time", "checkout_time"):
+        if k in b:
+            if not re.fullmatch(TIME_RE, str(b[k])):
+                raise UserError("Times must look like 14:00.")
+            new[k] = str(b[k])
+    if "guest_booking_enabled" in b:
+        if not isinstance(b["guest_booking_enabled"], bool):
+            raise UserError("Some of the values sent are not valid.")
+        new["guest_booking_enabled"] = "1" if b["guest_booking_enabled"] else "0"
+
+    def work():
+        old = raw_settings(conn)
+        changed = {k: v for k, v in new.items() if old[k] != v}
+        for k, v in changed.items():
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (k, v))
+        audit(conn, c.user, "admin.settings", None, None, ", ".join(f"{k}={old[k]}" for k in changed) or None, ", ".join(f"{k}={v}" for k, v in changed.items()) or "no change")
+    g.write(conn, work)
+    return {"settings": raw_settings(conn)}
+
+
 R = lambda method, pattern, fn, roles: (method, re.compile(pattern + r"\Z"), fn, roles)
 ROUTES = [R("POST", r"/api/login", login, None), R("POST", r"/api/logout", logout, ALL), R("GET", r"/api/meta", meta, ALL),
           R("GET", r"/api/dashboard", dashboard, ALL), R("GET", r"/api/rooms", rooms_view, ALL), R("GET", r"/api/bookings", bookings_list, FRONT),
@@ -743,6 +926,10 @@ ROUTES = [R("POST", r"/api/login", login, None), R("POST", r"/api/logout", logou
           R("GET", r"/api/room_types", rate_types, MGR), R("POST", r"/api/room_types", rate_save, MGR), R("POST", r"/api/room_types/(?P<id>\d+)/delete", rate_delete, MGR),
           R("GET", r"/api/settings", settings_get, MGR), R("POST", r"/api/settings/property", property_save, MGR),
           R("POST", r"/api/settings/times", times_save, frozenset({"super_admin"})),
+          R("GET", r"/api/admin/data", admin_data, SUPER), R("POST", r"/api/admin/properties", admin_property, SUPER),
+          R("POST", r"/api/admin/room_types", rate_save, SUPER), R("POST", r"/api/admin/rooms", admin_room, SUPER),
+          R("POST", r"/api/admin/users", admin_user, SUPER), R("POST", r"/api/admin/settings", admin_settings, SUPER),
+          R("POST", r"/api/admin/(?P<kind>properties|room_types|rooms|users)/(?P<id>\d+)/active", admin_active, SUPER),
           R("POST", r"/api/me/profile", profile_save, ALL), R("POST", r"/api/me/password", password_change, ALL)]
 for _name, (_new, _from, _act, _roles) in ACTIONS.items():
     ROUTES.append(R("POST", rf"/api/bookings/(?P<id>\d+)/{_name}", (lambda n, f, a: lambda conn, c: set_status(conn, c, n, f, a))(_new, _from, _act), _roles))

@@ -5,7 +5,7 @@ Usage:
   python tools/mantralayam_rooms.py backup           # timestamped DB copy in .tmp/backups (keeps 14)
 
 Reads and writes the existing SQLite database (.tmp/mantralayam.db, or MANTRALAYAM_DB).
-It never creates tables or reseeds data. Rules live in dispatch() so tests call it directly;
+It never reseeds data; migrate() only adds missing columns or tables. Rules live in dispatch() so tests call it directly;
 the HTTP handler is a thin wrapper.
 """
 import json
@@ -43,12 +43,28 @@ def today():
     return date.today()
 
 
+MIGRATED = set()
+
+
+def migrate(conn):
+    """Idempotent additive schema changes, run once per process and database file. Never drops or rewrites data."""
+    if "active" not in {r[1] for r in conn.execute("PRAGMA table_info(room_types)")}:
+        conn.execute("ALTER TABLE room_types ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
+
+
 def connect():
     if not DB.exists():
         raise UserError("The booking system is not set up yet. Please call the property.", 503)
     conn = sqlite3.connect(DB, timeout=10, isolation_level=None)  # manual BEGIN IMMEDIATE for writes
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    if str(DB) not in MIGRATED:
+        try:
+            write(conn, lambda: migrate(conn))
+        except sqlite3.OperationalError:  # another process migrated first
+            if "active" not in {r[1] for r in conn.execute("PRAGMA table_info(room_types)")}:
+                raise
+        MIGRATED.add(str(DB))
     return conn
 
 
@@ -119,7 +135,7 @@ def free_rooms(conn, ci, co, property_id=None, type_id=None):
         SELECT r.id, r.number, r.capacity, r.amenities, r.property_id, r.room_type_id,
                p.name AS pname, p.address, t.name AS tname, t.description AS tdesc, t.tariff
         FROM rooms r JOIN properties p ON p.id = r.property_id JOIN room_types t ON t.id = r.room_type_id
-        WHERE r.active = 1 AND p.active = 1
+        WHERE r.active = 1 AND p.active = 1 AND t.active = 1
           AND (:pid IS NULL OR r.property_id = :pid) AND (:tid IS NULL OR r.room_type_id = :tid)
           AND NOT EXISTS (SELECT 1 FROM bookings b WHERE b.room_id = r.id AND b.status IN ('Confirmed', 'Checked-In')
                           AND b.check_in < :co AND b.check_out > :ci)
@@ -148,13 +164,13 @@ def info(conn, q, ip):
     s = settings(conn)
     types = lambda pid: conn.execute(
         "SELECT DISTINCT t.id, t.name, t.tariff FROM rooms r JOIN room_types t ON t.id = r.room_type_id "
-        "WHERE r.active = 1 AND r.property_id = ? ORDER BY t.tariff", (pid,)).fetchall()
+        "WHERE r.active = 1 AND t.active = 1 AND r.property_id = ? ORDER BY t.tariff", (pid,)).fetchall()
     props = [dict(p) | {"room_types": [r["name"] for r in types(p["id"])], "type_ids": [r["id"] for r in types(p["id"])]}
         for p in conn.execute("SELECT id, name, address, description, facilities, contact_person, phone FROM properties WHERE active = 1 ORDER BY id")]
     return {"today": today().isoformat(), "last_check_in": (today() + timedelta(days=s["advance"])).isoformat(),
             "settings": {"guest_booking_enabled": s["enabled"], "checkin_time": s["checkin_time"], "checkout_time": s["checkout_time"],
                          "guest_cancel_cutoff_hours": s["cutoff"]},
-            "properties": props, "room_types": [dict(r) for r in conn.execute("SELECT id, name FROM room_types WHERE id IN (SELECT room_type_id FROM rooms WHERE active = 1) ORDER BY tariff")]}
+            "properties": props, "room_types": [dict(r) for r in conn.execute("SELECT id, name FROM room_types WHERE active = 1 AND id IN (SELECT room_type_id FROM rooms WHERE active = 1) ORDER BY tariff")]}
 
 
 def search(conn, q, ip):

@@ -13,7 +13,7 @@ Let pilgrims search room availability, book rooms, look up and cancel their own 
 | Export report to Google Sheets | not built, needs `credentials.json` |
 
 ## Inputs and data
-- Database: `.tmp/mantralayam.db` (override with env `MANTRALAYAM_DB`). Tables: `properties`, `room_types`, `rooms`, `bookings`, `room_status_events`, `settings`, `audit_log`, `users`, `roles`, `user_properties`. The tool never creates tables or reseeds data.
+- Database: `.tmp/mantralayam.db` (override with env `MANTRALAYAM_DB`). Tables: `properties`, `room_types`, `rooms`, `bookings`, `room_status_events`, `settings`, `audit_log`, `users`, `roles`, `user_properties`. The tool never reseeds data; `migrate()` only adds missing columns or tables (currently `room_types.active`), once per process and database file.
 - Settings (table `settings`, defaults in the tool): `guest_booking_enabled`, `guest_max_rooms` (3), `guest_advance_days` (90), `guest_max_nights` (15), `guest_cancel_cutoff_hours` (24), `checkin_time` (14:00), `checkout_time` (11:00).
 
 ## How to run

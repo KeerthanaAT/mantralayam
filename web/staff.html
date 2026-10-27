@@ -97,6 +97,18 @@
   </form>
 </dialog>
 
+<dialog id="adlg" aria-labelledby="adlg-h">
+  <form id="aform" method="dialog" novalidate>
+    <h2 id="adlg-h"></h2>
+    <div id="afields" style="display:grid;gap:var(--s3)"></div>
+    <p id="a_err" class="msg error" role="alert" hidden></p>
+    <div class="foot">
+      <button type="button" class="btn secondary" id="a_back">Close</button>
+      <button type="submit" class="btn" id="a_submit">Save</button>
+    </div>
+  </form>
+</dialog>
+
 <noscript><p style="padding:2rem">The staff app needs JavaScript.</p></noscript>
 <script>
 "use strict";
@@ -140,12 +152,13 @@ const opt = (v, l, sel) => h("option", { value: v, selected: String(v) === Strin
 const can = (k) => S.meta.can[k];
 
 // ---------- chrome, routing ----------
-const VIEWS = { today: ["Today", todayView], rooms: ["Rooms", roomsView], bookings: ["Bookings", bookingsView], status: ["Room status", statusView], audit: ["Audit log", auditView] };
+const VIEWS = { today: ["Today", todayView], rooms: ["Rooms", roomsView], bookings: ["Bookings", bookingsView], status: ["Room status", statusView], audit: ["Audit log", auditView], admin: ["Admin", adminView] };
+const GATE = { audit: "audit", admin: "admin" };
 function chrome() {
   $("#chrome").hidden = !S.meta;
   if (!S.meta) return;
   const cur = location.hash.replace(/^#\/?/, "") || "today";
-  $("#navlist").replaceChildren(...Object.entries(VIEWS).filter(([k]) => k !== "audit" || can("audit")).map(([k, [label]]) =>
+  $("#navlist").replaceChildren(...Object.entries(VIEWS).filter(([k]) => !GATE[k] || can(GATE[k])).map(([k, [label]]) =>
     h("li", null, h("a", { href: "#/" + (k === "today" ? "" : k), "data-r": k, "aria-current": k === cur ? "page" : null }, label))));
   $("#who").replaceChildren(h("strong", null, S.meta.user.full_name), S.meta.user.role.replace("_", " "));
 }
@@ -157,7 +170,7 @@ async function route() {
   if (!S.meta) { try { S.meta = await api("/api/meta"); } catch { chrome(); return loginView(root); } }
   chrome();
   const name = location.hash.replace(/^#\/?/, "").split("/")[0] || "today";
-  const [label, fn] = VIEWS[name] && (name !== "audit" || can("audit")) ? VIEWS[name] : VIEWS.today;
+  const [label, fn] = VIEWS[name] && (!GATE[name] || can(GATE[name])) ? VIEWS[name] : VIEWS.today;
   document.title = label + " · Mantralayam Staff";
   root.replaceChildren(loading());
   try { await fn(root); } catch (e) { root.replaceChildren(fail(e, route)); }
@@ -303,6 +316,111 @@ async function auditView(root) {
   root.replaceChildren(h("h1", null, "Audit log"), f, out);
   await load();
 }
+
+// ---------- admin (super admin only) ----------
+const A = { tab: "properties", data: null };
+const yn = (on) => badge(on ? "available" : "blocked", on ? "Active" : "Inactive");
+const adminTable = (caption, heads, rows, empty) => rows.length ? h("div", { class: "scroll", role: "region", "aria-label": caption, tabindex: "0" }, h("table", null, h("caption", null, caption),
+  h("thead", null, h("tr", null, heads.map((t) => h("th", { scope: "col" }, t)))), h("tbody", null, rows))) : h("p", { class: "empty card" }, empty);
+const adminSection = (title, addLabel, onAdd, table) => h("section", { "aria-label": title }, h("div", { class: "head" }, h("h2", null, title), addLabel ? h("button", { class: "btn", type: "button", onclick: onAdd }, addLabel) : null), table);
+const adminActions = (editFn, name, toggleBtn) => h("td", { class: "actions" }, h("button", { class: "btn small secondary", type: "button", "aria-label": "Edit " + name, onclick: editFn }, "Edit"), toggleBtn);
+const toggleBtn = (kind, r, name, reload) => h("button", { class: "btn small secondary", type: "button", "aria-label": `${r.active ? "Deactivate" : "Activate"} ${name}`, onclick: async () => {
+  try { await api(`/api/admin/${kind}/${r.id}/active`, { active: !r.active }); toast(`${name} ${r.active ? "deactivated" : "activated"}.`); await reload(); } catch (e) { toast(e.message); } } }, r.active ? "Deactivate" : "Activate");
+const num = (min, hi) => ({ type: "number", min, hi });
+
+const ADMIN_SECTIONS = {
+  properties: (d, reload) => {
+    const fields = [{ name: "name", label: "Name", req: true, max: 100 }, { name: "address", label: "Address", max: 300 }, { name: "contact_person", label: "Contact person", max: 100 },
+      { name: "phone", label: "Phone", max: 30 }, { name: "description", label: "Description", type: "textarea", max: 1000 }, { name: "facilities", label: "Facilities", type: "textarea", max: 1000 }];
+    const edit = (p) => editDialog(p ? "Edit property" : "Add property", fields, p || {}, (v) => api("/api/admin/properties", { ...v, id: p && p.id }), reload);
+    return adminSection("Properties", "Add property", () => edit(), adminTable("Properties", ["Name", "Contact", "Phone", "Status", "Actions"],
+      d.properties.map((p) => h("tr", null, h("td", null, h("strong", null, p.name), h("div", { class: "small muted" }, p.address || "")), h("td", null, p.contact_person || ""), h("td", null, p.phone || ""),
+        h("td", null, yn(p.active)), adminActions(() => edit(p), p.name, toggleBtn("properties", p, p.name, reload)))), "No properties yet."));
+  },
+  room_types: (d, reload) => {
+    const fields = [{ name: "name", label: "Name", req: true, max: 60 }, { name: "capacity", label: "Sleeps", req: true, ...num(1, 100) }, { name: "tariff", label: "Tariff per night (Rs)", req: true, ...num(0, 1000000) },
+      { name: "description", label: "Description", type: "textarea", max: 300 }];
+    const edit = (t) => editDialog(t ? "Edit room type" : "Add room type", fields, t || {}, (v) => api("/api/admin/room_types", { ...v, id: t && t.id }), reload);
+    return adminSection("Room types", "Add room type", () => edit(), adminTable("Room types", ["Name", "Sleeps", "Tariff", "Status", "Actions"],
+      d.room_types.map((t) => h("tr", null, h("td", null, h("strong", null, t.name), h("div", { class: "small muted" }, t.description || "")), h("td", null, t.capacity), h("td", null, inr.format(t.tariff)),
+        h("td", null, yn(t.active)), adminActions(() => edit(t), t.name, toggleBtn("room_types", t, t.name, reload)))), "No room types yet."));
+  },
+  rooms: (d, reload) => {
+    const edit = (r) => editDialog(r ? "Edit room " + r.number : "Add room", [
+      { name: "property_id", label: "Property", type: "select", req: true, disabled: !!r, options: d.properties.filter((p) => p.active || (r && r.property_id === p.id)).map((p) => [p.id, p.name]) },
+      { name: "number", label: "Room number", req: true, max: 20 }, { name: "floor", label: "Floor", ...num(-5, 200) },
+      { name: "room_type_id", label: "Room type", type: "select", req: true, options: d.room_types.filter((t) => t.active || (r && r.room_type_id === t.id)).map((t) => [t.id, t.name]) },
+      { name: "capacity", label: "Sleeps", req: true, ...num(1, 100) }, { name: "amenities", label: "Amenities (comma separated)", max: 300 }], r || { floor: 0 },
+      (v) => api("/api/admin/rooms", { ...v, id: r && r.id }), reload);
+    return adminSection("Rooms", "Add room", () => edit(), adminTable("Rooms", ["Room", "Property", "Type", "Sleeps", "Status", "Actions"],
+      d.rooms.map((r) => h("tr", null, h("td", null, h("strong", null, r.number), h("div", { class: "small muted" }, "Floor " + r.floor)), h("td", null, r.property), h("td", null, r.type), h("td", null, r.capacity),
+        h("td", null, yn(r.active)), adminActions(() => edit(r), "room " + r.number, toggleBtn("rooms", r, "room " + r.number, reload)))), "No rooms yet."));
+  },
+  users: (d, reload) => {
+    const edit = (u) => editDialog(u ? "Edit user" : "Add user", [
+      { name: "username", label: "Username", req: true, max: 40 }, { name: "full_name", label: "Full name", req: true, max: 100 },
+      { name: "role", label: "Role", type: "select", req: true, options: d.roles.map((r) => [r.name, r.label]) },
+      { name: "password", label: u ? "New password (leave empty to keep the current one)" : "Password", type: "password", req: !u, max: 200, hint: "At least 8 characters. A password reset signs the user out." },
+      { name: "property_ids", label: "Properties this user can work in (not needed for super admin)", type: "checks", options: d.properties.filter((p) => p.active).map((p) => [p.id, p.name]) }],
+      u ? { ...u, password: "" } : { role: "front_desk", property_ids: [] }, (v) => api("/api/admin/users", { ...v, id: u && u.id }), reload);
+    const pname = (u) => u.role === "super_admin" ? "All" : u.property_ids.map((i) => (d.properties.find((p) => p.id === i) || {}).name).filter(Boolean).join(", ") || "None";
+    return adminSection("Users", "Add user", () => edit(), adminTable("Users", ["User", "Role", "Properties", "Status", "Actions"],
+      d.users.map((u) => h("tr", null, h("td", null, h("strong", null, u.full_name), h("div", { class: "small muted" }, u.username)), h("td", null, u.role.replace("_", " ")), h("td", null, pname(u)),
+        h("td", null, yn(u.active)), adminActions(() => edit(u), u.username, u.id === S.meta.user.id ? null : toggleBtn("users", u, u.username, reload)))), "No users yet."));
+  },
+  settings: (d, reload) => {
+    const s = d.settings, R = d.setting_ranges, err = h("p", { class: "msg error", role: "alert", hidden: true });
+    const field = (k, label, extra) => h("div", null, h("label", { for: "s_" + k, class: "req" }, label), h("input", { id: "s_" + k, name: k, value: s[k], required: true, ...extra }));
+    const f = h("form", { class: "card", "aria-label": "Booking settings", style: "display:grid;gap:1rem;max-width:40rem" },
+      h("label", { style: "display:flex;gap:.5rem;align-items:center" }, h("input", { type: "checkbox", id: "s_enabled", checked: s.guest_booking_enabled === "1" }), "Online booking is open to guests"),
+      h("div", { class: "grid2" }, [["guest_max_rooms", 0], ["guest_advance_days", 1], ["guest_max_nights", 2], ["guest_cancel_cutoff_hours", 3]].map(([k]) => field(k, R[k][2], { type: "number", min: R[k][0], max: R[k][1], inputmode: "numeric" })),
+        field("checkin_time", "Check-in time", { type: "time" }), field("checkout_time", "Check-out time", { type: "time" })),
+      err, h("div", null, h("button", { class: "btn", type: "submit" }, "Save settings")));
+    f.addEventListener("submit", async (e) => {
+      e.preventDefault(); err.hidden = true;
+      if (!f.reportValidity()) return;
+      const body = Object.fromEntries([...new FormData(f)]); body.guest_booking_enabled = $("#s_enabled").checked;
+      try { await api("/api/admin/settings", body); toast("Settings saved."); await reload(); } catch (x) { err.textContent = x.message; err.hidden = false; }
+    });
+    return adminSection("Booking settings", null, null, f);
+  },
+};
+const ADMIN_TABS = [["properties", "Properties"], ["room_types", "Room types"], ["rooms", "Rooms"], ["users", "Users"], ["settings", "Settings"]];
+async function adminView(root) {
+  const out = h("div", null);
+  const draw = () => out.replaceChildren(ADMIN_SECTIONS[A.tab](A.data, load));
+  const load = async () => { A.data = await api("/api/admin/data"); draw(); };
+  const tabs = h("nav", { class: "toolbar", "aria-label": "Admin sections" }, ADMIN_TABS.map(([k, l]) => h("button", { class: "btn small " + (k === A.tab ? "" : "secondary"), type: "button", "data-tab": k, "aria-current": k === A.tab ? "page" : null,
+    onclick: (e) => { A.tab = k; tabs.querySelectorAll("button").forEach((b) => { const on = b.dataset.tab === k; b.classList.toggle("secondary", !on); on ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"); }); draw(); } }, l)));
+  root.replaceChildren(h("h1", null, "Admin"), tabs, out);
+  await load();
+}
+let AD = null;
+function editDialog(title, fields, vals, save, reload) {
+  AD = { fields, save, reload };
+  $("#adlg-h").textContent = title; $("#a_err").hidden = true;
+  $("#afields").replaceChildren(...fields.map((x) => {
+    const id = "a_" + x.name, v = vals[x.name] ?? "";
+    if (x.type === "checks") return h("fieldset", { id }, h("legend", null, x.label), h("div", { class: "grid2" }, x.options.map(([ov, ol]) =>
+      h("label", { style: "display:flex;gap:.5rem;align-items:center" }, h("input", { type: "checkbox", name: x.name, value: ov, checked: (v || []).includes(ov) }), ol))));
+    const input = x.type === "select" ? h("select", { id, required: x.req, disabled: x.disabled }, x.options.map(([ov, ol]) => opt(ov, ol, v)))
+      : x.type === "textarea" ? h("textarea", { id, maxlength: x.max, value: v })
+      : h("input", { id, type: x.type || "text", required: x.req, maxlength: x.max, min: x.min, max: x.hi, value: v, autocomplete: "off" });
+    return h("div", null, h("label", { for: id, class: x.req ? "req" : null }, x.label), input, x.hint ? h("p", { class: "hint" }, x.hint) : null);
+  }));
+  $("#adlg").showModal();
+}
+$("#a_back").onclick = () => $("#adlg").close();
+$("#aform").addEventListener("submit", async (e) => {
+  e.preventDefault(); const btn = $("#a_submit"); $("#a_err").hidden = true;
+  if (!$("#aform").reportValidity()) return;
+  const body = {};
+  AD.fields.forEach((x) => { body[x.name] = x.type === "checks" ? [...$("#aform").querySelectorAll(`input[name="${x.name}"]:checked`)].map((i) => Number(i.value)) : $("#a_" + x.name).value; });
+  btn.disabled = true;
+  try { await AD.save(body); $("#adlg").close(); toast("Saved."); await AD.reload(); }
+  catch (x) { $("#a_err").textContent = x.message; $("#a_err").hidden = false; }
+  finally { btn.disabled = false; }
+});
 
 // ---------- dialogs ----------
 const fillRooms = async (propEl, roomEl, date, keep) => {

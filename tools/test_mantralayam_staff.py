@@ -66,7 +66,7 @@ def test_all():
     for u in ("admin", "manager", "frontdesk", "housekeeping", "viewer"):
         st, m = login(u)
         assert st == 200 and m["user"]["username"] == u, (u, m)
-    assert call("viewer", "GET", "/api/meta")[1]["can"] == dict(book=False, status=False, clean=False, audit=False)
+    assert call("viewer", "GET", "/api/meta")[1]["can"] == dict(book=False, status=False, clean=False, audit=False, admin=False)
 
     # property scoping: front desk has properties 1,2 only
     assert call("frontdesk", "GET", "/api/dashboard", dict(property_id=3))[0] == 403
@@ -147,7 +147,7 @@ def test_all():
 
     # menu pages by role: the server decides, and enforces it on every route
     pages = lambda u: [p["key"] for p in call(u, "GET", "/api/meta")[1]["pages"]]
-    assert pages("admin") == pages("manager") and "reports" in pages("admin") and "rates" in pages("admin")
+    assert set(pages("admin")) == set(pages("manager")) | {"admin"} and "reports" in pages("admin") and "rates" in pages("admin")
     assert "reports" not in pages("frontdesk") and "rates" not in pages("frontdesk") and "audit" not in pages("frontdesk") and "settings" in pages("frontdesk")
     assert pages("housekeeping") == ["today", "rooms", "status", "notifications", "settings"]
     for u in ("frontdesk", "housekeeping", "viewer"):
@@ -245,9 +245,90 @@ def test_all():
     assert hashlib.md5(SRC.read_bytes()).hexdigest() == before, "the real database must not change"
 
 
+def test_admin():
+    db = sqlite3.connect(g.DB)
+    h, salt = s.make_hash(PW)
+    db.execute("UPDATE users SET pw_hash = ?, salt = ?, active = 1", (h, salt)); db.commit()
+    s.FAILS.clear()
+    for u in ("admin", "manager", "frontdesk", "viewer"):
+        assert login(u)[0] == 200, u
+    # only super_admin may touch the admin screens
+    for u in ("manager", "frontdesk", "viewer"):
+        assert call(u, "GET", "/api/admin/data")[0] == 403 and call(u, "POST", "/api/admin/rooms", {})[0] == 403, u
+        assert call(u, "POST", "/api/admin/settings", {"guest_max_rooms": 2})[0] == 403
+    assert "admin" not in [p["key"] for p in call("manager", "GET", "/api/meta")[1]["pages"]]
+    d = call("admin", "GET", "/api/admin/data")[1]
+    assert d["properties"] and d["rooms"] and d["roles"] and d["settings"]["guest_max_rooms"]
+
+    # properties, room types, rooms: create, edit, validation
+    st, p = call("admin", "POST", "/api/admin/properties", {"name": "Test Mutt", "phone": "08512 280000"})
+    assert st == 200
+    assert call("admin", "POST", "/api/admin/properties", {"name": "Test Mutt"})[0] == 409
+    assert call("admin", "POST", "/api/admin/properties", {"name": "X", "phone": "abc"})[0] == 400
+    assert call("admin", "POST", "/api/admin/properties", {"id": p["id"], "name": "Test Mutt 2"})[0] == 200
+    st, t = call("admin", "POST", "/api/admin/room_types", {"name": "Test Suite", "capacity": 3, "tariff": 999})
+    assert st == 200 and call("admin", "POST", "/api/admin/room_types", {"name": "Test Suite", "capacity": 3, "tariff": 1})[0] == 409
+    room = dict(property_id=p["id"], number="T1", floor=1, room_type_id=t["id"], capacity=3, amenities="Fan")
+    assert call("admin", "POST", "/api/admin/rooms", room | {"capacity": 0})[0] == 400
+    st, r = call("admin", "POST", "/api/admin/rooms", room)
+    assert st == 200 and call("admin", "POST", "/api/admin/rooms", room)[0] == 409
+    assert call("admin", "POST", "/api/admin/rooms", room | {"id": r["id"], "number": "T1A"})[0] == 200
+    assert call("admin", "POST", "/api/admin/rooms", room | {"id": r["id"], "property_id": 1})[0] == 400  # cannot move property
+
+    # deactivate refuses while a current or future booking exists, and the guest site stops showing it afterwards
+    rm = next(x for x in call("admin", "GET", "/api/rooms", dict(property_id=p["id"]))[1] if x["id"] == r["id"])
+    st, bk = call("admin", "POST", "/api/bookings", guest(rm, check_in=D(40), check_out=D(41)))
+    assert st == 200, bk
+    for kind, id_ in (("rooms", r["id"]), ("room_types", t["id"]), ("properties", p["id"])):
+        st, out = call("admin", "POST", f"/api/admin/{kind}/{id_}/active", {"active": False})
+        assert st == 409 and "booking" in out["error"], (kind, out)
+    assert call("admin", "POST", "/api/admin/rooms", room | {"id": r["id"], "number": "T1A", "room_type_id": 1})[0] == 409  # type change blocked too
+    assert call("admin", "POST", f"/api/bookings/{bk['id']}/cancel", {"reason": "test"})[0] == 200
+    assert call("admin", "POST", f"/api/admin/rooms/{r['id']}/active", {"active": "no"})[0] == 400
+    for kind, id_ in (("rooms", r["id"]), ("room_types", t["id"]), ("properties", p["id"])):
+        assert call("admin", "POST", f"/api/admin/{kind}/{id_}/active", {"active": False})[0] == 200, kind
+    assert call("admin", "POST", "/api/admin/rooms", room | {"number": "T2"})[0] == 400  # inactive property or type
+    st, info = g.dispatch("GET", "/api/public/info", {}, None, "127.0.0.1")
+    assert t["id"] not in [x["id"] for x in info["room_types"]] and p["id"] not in [x["id"] for x in info["properties"] if x["type_ids"]]
+    assert call("admin", "POST", f"/api/admin/room_types/{t['id']}/active", {"active": True})[0] == 200
+
+    # users: validation, property assignment, self-protection, password reset signs the user out
+    u = dict(username="newdesk", full_name="New Desk", role="front_desk", password="Longenough1", property_ids=[1])
+    assert call("admin", "POST", "/api/admin/users", u | {"property_ids": []})[0] == 400
+    assert call("admin", "POST", "/api/admin/users", u | {"password": "short"})[0] == 400
+    assert call("admin", "POST", "/api/admin/users", u | {"role": "boss"})[0] == 400
+    assert call("admin", "POST", "/api/admin/users", u | {"property_ids": [p["id"]]})[0] == 400  # inactive property
+    st, nu = call("admin", "POST", "/api/admin/users", u)
+    assert st == 200 and call("admin", "POST", "/api/admin/users", u | {"username": "NEWDESK"})[0] == 409
+    assert login("newdesk", "Longenough1")[0] == 200 and call("newdesk", "GET", "/api/meta")[1]["properties"][0]["id"] == 1
+    assert call("admin", "POST", "/api/admin/users", u | {"id": nu["id"], "password": "", "role": "viewer"})[0] == 200
+    assert call("newdesk", "GET", "/api/meta")[1]["user"]["role"] == "viewer"
+    assert call("admin", "POST", "/api/admin/users", u | {"id": nu["id"], "password": "Another#Pass1"})[0] == 200
+    assert call("newdesk", "GET", "/api/meta")[0] == 401 and login("newdesk", "Another#Pass1")[0] == 200
+    me = next(x for x in d["users"] if x["username"] == "admin")
+    assert call("admin", "POST", "/api/admin/users", dict(username="admin", full_name="A", role="viewer", password="", property_ids=[1], id=me["id"]))[0] == 409
+    assert call("admin", "POST", f"/api/admin/users/{me['id']}/active", {"active": False})[0] == 409
+    assert call("admin", "POST", f"/api/admin/users/{nu['id']}/active", {"active": False})[0] == 200 and call("newdesk", "GET", "/api/meta")[0] == 401
+
+    # settings: ranges, persistence, the guest site obeys them
+    for bad in ({"guest_max_rooms": 0}, {"guest_max_rooms": "x"}, {"guest_advance_days": 5000}, {"checkin_time": "25:00"}, {"guest_booking_enabled": "yes"}):
+        assert call("admin", "POST", "/api/admin/settings", bad)[0] == 400, bad
+    assert call("admin", "POST", "/api/admin/settings", {"guest_max_rooms": 2, "guest_max_nights": 5, "checkin_time": "13:00", "guest_booking_enabled": True})[0] == 200
+    cfg = g.settings(g.connect())
+    assert (cfg["max_rooms"], cfg["max_nights"], cfg["checkin_time"], cfg["enabled"]) == (2, 5, "13:00", True)
+    assert call("admin", "POST", "/api/admin/settings", {"guest_booking_enabled": False})[0] == 200
+    assert g.dispatch("GET", "/api/public/search", dict(check_in=D(30), check_out=D(31), guests=1), None, "127.0.0.1")[0] == 403
+
+    # every admin action is in the audit log
+    actions = {r[0] for r in db.execute("SELECT action FROM audit_log WHERE action LIKE 'admin.%' OR action LIKE 'rate.%'")}
+    assert {"admin.property_create", "admin.room_create", "admin.user_create", "admin.user_edit", "admin.room_deactivate", "admin.settings", "rate.create"} <= actions, actions
+    db.close()
+
+
 if __name__ == "__main__":
     try:
         test_all()
+        test_admin()
         print("ok")
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
