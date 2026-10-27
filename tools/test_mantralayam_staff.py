@@ -318,6 +318,7 @@ def test_admin():
     assert (cfg["max_rooms"], cfg["max_nights"], cfg["checkin_time"], cfg["enabled"]) == (2, 5, "13:00", True)
     assert call("admin", "POST", "/api/admin/settings", {"guest_booking_enabled": False})[0] == 200
     assert g.dispatch("GET", "/api/public/search", dict(check_in=D(30), check_out=D(31), guests=1), None, "127.0.0.1")[0] == 403
+    assert call("admin", "POST", "/api/admin/settings", {"guest_booking_enabled": True, "guest_max_rooms": 3, "guest_max_nights": 15, "checkin_time": "14:00"})[0] == 200  # leave the copy as found
 
     # every admin action is in the audit log
     actions = {r[0] for r in db.execute("SELECT action FROM audit_log WHERE action LIKE 'admin.%' OR action LIKE 'rate.%'")}
@@ -343,11 +344,49 @@ def test_hold_blocks_walkin():
     db.close()
 
 
+def test_peak_admin():
+    db = sqlite3.connect(g.DB)
+    h, salt = s.make_hash(PW)
+    db.execute("UPDATE users SET pw_hash = ?, salt = ?, active = 1", (h, salt)); db.commit()
+    s.FAILS.clear()
+    for u in ("admin", "manager", "frontdesk"):
+        assert login(u)[0] == 200
+    pp = dict(name="Test Festival", start_date=D(40), end_date=D(44), max_nights="2", max_rooms="1", note="Book early.")
+    for u in ("manager", "frontdesk"):  # only super_admin manages peak periods
+        assert call(u, "POST", "/api/admin/peak_periods", pp)[0] == 403
+    assert call("admin", "GET", "/api/admin/data")[1]["peak_periods"] == []
+    for bad in ({"name": ""}, {"start_date": "nope"}, {"end_date": D(39)}, {"end_date": D(500)}, {"max_nights": "0"}, {"max_nights": "x"}, {"max_rooms": "99"}, {"note": "x" * 501}):
+        assert call("admin", "POST", "/api/admin/peak_periods", pp | bad)[0] == 400, bad
+    st, r = call("admin", "POST", "/api/admin/peak_periods", pp)
+    assert st == 200
+    row = call("admin", "GET", "/api/admin/data")[1]["peak_periods"][0]
+    assert (row["name"], row["max_nights"], row["max_rooms"], row["note"], row["active"]) == ("Test Festival", 2, 1, "Book early.", 1)
+
+    # the guest site picks it up at once, and edits and deactivation take effect at once
+    guest_search = lambda a, b: g.dispatch("GET", "/api/public/search", dict(check_in=D(a), check_out=D(b), guests=1), None, "127.0.0.1")
+    g.HITS.clear()
+    st, out = guest_search(40, 43)
+    assert st == 400 and "Test Festival" in out["error"], out
+    assert call("admin", "POST", "/api/admin/peak_periods", pp | {"id": r["id"], "max_nights": "", "max_rooms": ""})[0] == 200  # empty means no limit
+    st, out = guest_search(40, 43)
+    assert st == 200 and out["peak"][0]["note"] == "Book early."
+    assert call("admin", "POST", "/api/admin/peak_periods", pp | {"id": 9999})[0] == 404
+    assert call("admin", "POST", f"/api/admin/peak_periods/{r['id']}/active", {"active": "no"})[0] == 400
+    assert call("admin", "POST", f"/api/admin/peak_periods/{r['id']}/active", {"active": False})[0] == 200
+    assert guest_search(40, 43)[1]["peak"] == []
+    assert call("admin", "POST", f"/api/admin/peak_periods/{r['id']}/active", {"active": True})[0] == 200
+    assert call("manager", "POST", f"/api/admin/peak_periods/{r['id']}/active", {"active": False})[0] == 403
+    actions = {x[0] for x in db.execute("SELECT action FROM audit_log WHERE action LIKE 'admin.peak%'")}
+    assert actions == {"admin.peak_period_create", "admin.peak_period_edit", "admin.peak_period_deactivate", "admin.peak_period_activate"}, actions
+    db.close()
+
+
 if __name__ == "__main__":
     try:
         test_all()
         test_admin()
         test_hold_blocks_walkin()
+        test_peak_admin()
         print("ok")
     finally:
         shutil.rmtree(TMP, ignore_errors=True)

@@ -368,6 +368,19 @@ const ADMIN_SECTIONS = {
       d.users.map((u) => h("tr", null, h("td", null, h("strong", null, u.full_name), h("div", { class: "small muted" }, u.username)), h("td", null, u.role.replace("_", " ")), h("td", null, pname(u)),
         h("td", null, yn(u.active)), adminActions(() => edit(u), u.username, u.id === S.meta.user.id ? null : toggleBtn("users", u, u.username, reload)))), "No users yet."));
   },
+  peak_periods: (d, reload) => {
+    const fields = [{ name: "name", label: "Name (for example Brahmotsavam)", req: true, max: 100 },
+      { name: "start_date", label: "First night", type: "date", req: true }, { name: "end_date", label: "Last night", type: "date", req: true },
+      { name: "max_nights", label: "Most nights per booking (empty: normal limit)", ...num(1, 60) }, { name: "max_rooms", label: "Most rooms per booking (empty: normal limit)", ...num(1, 20) },
+      { name: "note", label: "Note shown to guests", type: "textarea", max: 500 }];
+    const edit = (x) => editDialog(x ? "Edit peak period" : "Add peak period", fields, x || {}, (v) => api("/api/admin/peak_periods", { ...v, id: x && x.id }), reload);
+    const limits = (x) => [x.max_nights ? `up to ${x.max_nights} nights` : null, x.max_rooms ? `up to ${x.max_rooms} room${x.max_rooms > 1 ? "s" : ""}` : null].filter(Boolean).join(", ") || "Normal limits";
+    return adminSection("Peak periods", "Add peak period", () => edit(), h("div", { style: "display:grid;gap:var(--s3)" },
+      h("p", { class: "muted" }, "Festival or busy dates. A limit here can only tighten the normal settings, never loosen them, and applies to online bookings whose nights touch the period. Existing bookings are not changed."),
+      adminTable("Peak periods", ["Name", "Dates (nights)", "Online limits", "Note", "Status", "Actions"],
+        d.peak_periods.map((x) => h("tr", null, h("td", null, h("strong", null, x.name)), h("td", null, fmtDate(x.start_date), " to ", fmtDate(x.end_date)), h("td", null, limits(x)),
+          h("td", null, x.note || ""), h("td", null, yn(x.active)), adminActions(() => edit(x), x.name, toggleBtn("peak_periods", x, x.name, reload)))), "No peak periods yet.")));
+  },
   settings: (d, reload) => {
     const s = d.settings, R = d.setting_ranges, err = h("p", { class: "msg error", role: "alert", hidden: true });
     const field = (k, label, extra) => h("div", null, h("label", { for: "s_" + k, class: "req" }, label), h("input", { id: "s_" + k, name: k, value: s[k], required: true, ...extra }));
@@ -385,10 +398,10 @@ const ADMIN_SECTIONS = {
     return adminSection("Booking settings", null, null, f);
   },
 };
-const ADMIN_TABS = [["properties", "Properties"], ["room_types", "Room types"], ["rooms", "Rooms"], ["users", "Users"], ["settings", "Settings"]];
+const ADMIN_TABS = [["properties", "Properties"], ["room_types", "Room types"], ["rooms", "Rooms"], ["users", "Users"], ["peak_periods", "Peak periods"], ["settings", "Settings"]];
 async function adminView(root) {
   const out = h("div", null);
-  const draw = () => out.replaceChildren(ADMIN_SECTIONS[A.tab](A.data, load));
+  const draw = () => { if (A.data) out.replaceChildren(ADMIN_SECTIONS[A.tab](A.data, load)); };  // a tab click before the first load finishes waits for it
   const load = async () => { A.data = await api("/api/admin/data"); draw(); };
   const tabs = h("nav", { class: "toolbar", "aria-label": "Admin sections" }, ADMIN_TABS.map(([k, l]) => h("button", { class: "btn small " + (k === A.tab ? "" : "secondary"), type: "button", "data-tab": k, "aria-current": k === A.tab ? "page" : null,
     onclick: (e) => { A.tab = k; tabs.querySelectorAll("button").forEach((b) => { const on = b.dataset.tab === k; b.classList.toggle("secondary", !on); on ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"); }); draw(); } }, l)));

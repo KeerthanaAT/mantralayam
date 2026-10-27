@@ -65,6 +65,8 @@ def migrate(conn):
                  "check_in TEXT NOT NULL, check_out TEXT NOT NULL, expires_at TEXT NOT NULL, ip TEXT)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_holds_room ON holds(room_id, expires_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_holds_token ON holds(token)")
+    conn.execute("CREATE TABLE IF NOT EXISTS peak_periods (id INTEGER PRIMARY KEY, name TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL, "
+                 "max_nights INTEGER, max_rooms INTEGER, note TEXT, active INTEGER NOT NULL DEFAULT 1, CHECK (end_date >= start_date))")
 
 
 def connect():
@@ -77,7 +79,7 @@ def connect():
         try:
             write(conn, lambda: migrate(conn))
         except sqlite3.OperationalError:  # another process migrated first
-            if not conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'holds'").fetchone():
+            if not conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'peak_periods'").fetchone():
                 raise
         MIGRATED.add(str(DB))
     return conn
@@ -138,9 +140,41 @@ def parse_stay(conn, check_in, check_out):
         raise UserError("Check-out must be after check-in.")
     if ci > last:
         raise UserError(f"Online booking is open up to {s['advance']} days ahead (check-in on or before {last.isoformat()}).")
+    apply_peak(conn, s, ci, co)
     if (co - ci).days > s["max_nights"]:
-        raise UserError(f"Online bookings can be for at most {s['max_nights']} nights. For a longer stay please call the property.")
+        during = f"During {s['peak_nights']} online" if s["peak_nights"] else "Online"
+        raise UserError(f"{during} bookings can be for at most {s['max_nights']} nights. For a longer stay please call the property.")
     return ci, co, (co - ci).days, s
+
+
+def peak_periods(conn, ci, co):
+    """Active peak periods touching the nights [ci, co): a period's end date is its last night, inclusive."""
+    return [dict(r) for r in conn.execute("SELECT id, name, start_date, end_date, max_nights, max_rooms, note FROM peak_periods "
+                                          "WHERE active = 1 AND start_date < ? AND end_date >= ? ORDER BY start_date, id", (co.isoformat(), ci.isoformat()))]
+
+
+def apply_peak(conn, s, ci, co):
+    """Tightens s['max_nights'] and s['max_rooms'] to the strictest overlapping peak period (never loosens them).
+    Adds s['peak'] (the periods), s['peak_nights'] and s['peak_rooms'] (names of the periods that set the limit, else '')."""
+    s["peak"] = peak_periods(conn, ci, co)
+    for key in ("max_nights", "max_rooms"):
+        caps = [(p[key], p["name"]) for p in s["peak"] if p[key]]
+        low = min((v for v, _ in caps), default=None)
+        if low is not None and low < s[key]:
+            s[key] = low
+            s["peak_" + key[4:]] = ", ".join(n for v, n in caps if v == low)
+        else:
+            s["peak_" + key[4:]] = ""
+
+
+def room_count(b, s):
+    try:
+        n = int(b.get("rooms"))
+    except (TypeError, ValueError):
+        n = 0
+    if n > s["max_rooms"] and s["peak_rooms"]:
+        raise UserError(f"During {s['peak_rooms']} you can book at most {s['max_rooms']} room{'s' if s['max_rooms'] > 1 else ''} online. Please call the property to book more.")
+    return to_int(n, "Please choose how many rooms you need.", 1, s["max_rooms"])
 
 
 HOLD_MINUTES = 10
@@ -198,6 +232,8 @@ def info(conn, q, ip):
     return {"today": today().isoformat(), "last_check_in": (today() + timedelta(days=s["advance"])).isoformat(),
             "settings": {"guest_booking_enabled": s["enabled"], "checkin_time": s["checkin_time"], "checkout_time": s["checkout_time"],
                          "guest_cancel_cutoff_hours": s["cutoff"]},
+            "peak_periods": [dict(r) for r in conn.execute("SELECT name, start_date, end_date, max_nights, max_rooms, note FROM peak_periods WHERE active = 1 AND end_date >= ? "
+                                                           "ORDER BY start_date, id", (today().isoformat(),))],
             "properties": props, "room_types": [dict(r) for r in conn.execute("SELECT id, name FROM room_types WHERE active = 1 AND id IN (SELECT room_type_id FROM rooms WHERE active = 1) ORDER BY tariff")]}
 
 
@@ -221,7 +257,7 @@ def search(conn, q, ip):
                            "few_left": len(rooms) <= 2, "rooms_needed": need, "can_book": min(len(rooms), s["max_rooms"])})
     for p in props.values():
         p["types"].sort(key=lambda t: t["tariff"])
-    return {"check_in": ci.isoformat(), "check_out": co.isoformat(), "nights": nights, "guests": guests, "properties": list(props.values())}
+    return {"check_in": ci.isoformat(), "check_out": co.isoformat(), "nights": nights, "guests": guests, "properties": list(props.values()), "peak": s["peak"]}
 
 
 def norm_phone(v):
@@ -287,7 +323,7 @@ def book(conn, b, ip):
     if b.get("payment_method") != "pay_at_counter":
         raise UserError("Please choose a valid payment option.")
     pid, tid = to_int(b.get("property_id"), "Please choose a valid property and room type.", 1, 10**9), to_int(b.get("room_type_id"), "Please choose a valid property and room type.", 1, 10**9)
-    n = to_int(b.get("rooms"), "Please choose how many rooms you need.", 1, s["max_rooms"])
+    n = room_count(b, s)
     guests = to_int(b.get("guests"), "Number of guests must be between 1 and 200.", 1, 200)
     if guests < n:
         raise UserError("There must be at least one guest per room. Reduce the number of rooms.")
@@ -340,7 +376,7 @@ def hold(conn, b, ip):
     ci, co, nights, s = parse_stay(conn, b.get("check_in"), b.get("check_out"))
     pid = to_int(b.get("property_id"), "Please choose a valid property and room type.", 1, 10**9)
     tid = to_int(b.get("room_type_id"), "Please choose a valid property and room type.", 1, 10**9)
-    n = to_int(b.get("rooms"), "Please choose how many rooms you need.", 1, s["max_rooms"])
+    n = room_count(b, s)
     old = str(b.get("token") or "")[:64]
 
     def work():

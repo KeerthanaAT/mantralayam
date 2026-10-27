@@ -270,10 +270,68 @@ def test_holds_and_limits():
     db.close()
 
 
+def test_peak_periods():
+    db = sqlite3.connect(m.DB)
+    db.execute("DELETE FROM peak_periods")
+    ins = lambda name, a, b, nights=None, rooms=None, note=None, active=1: db.execute(
+        "INSERT INTO peak_periods (name, start_date, end_date, max_nights, max_rooms, note, active) VALUES (?,?,?,?,?,?,?)", (name, D(a), D(b), nights, rooms, note, active))
+    ins("Brahmotsavam", 80, 84, nights=2, rooms=1, note="Very crowded. Dormitory only on request.")
+    ins("Loose cap", 80, 84, nights=30, rooms=10)       # a limit above the normal one never loosens it
+    ins("Switched off", 70, 79, nights=1, rooms=1, active=0)  # inactive periods are ignored
+    db.commit()
+    search = lambda a, b, **kw: call("GET", "/api/public/search", dict(check_in=D(a), check_out=D(b), guests=2, **kw))
+
+    # which stays touch the period: its end date is the last night, so D(84)->D(85) is in and D(85)->D(86) is out
+    for a, b, inside in [(80, 82, True), (79, 81, True), (84, 85, True), (79, 80, False), (85, 86, False), (86, 89, False)]:
+        st, r = search(a, b)
+        assert st == 200 and bool(r["peak"]) == inside, (a, b, r["peak"])
+    st, r = search(80, 82)
+    assert r["peak"][0]["name"] == "Brahmotsavam" and "crowded" in r["peak"][0]["note"] and len(r["peak"]) == 2
+    assert all(t["can_book"] <= 1 for p in r["properties"] for t in p["types"]), "peak max_rooms limits what a guest may pick"
+    assert any(t["can_book"] > 1 for p in search(86, 87)[1]["properties"] for t in p["types"]), "outside the period the normal limit applies"
+
+    # max_nights enforced on search, hold and book, naming the period; normal stays outside are untouched
+    st, r = search(80, 83)
+    assert st == 400 and "Brahmotsavam" in r["error"] and "at most 2 nights" in r["error"], r
+    st, r = search(86, 89)
+    assert st == 200 and not r["peak"]
+    pid, t = r["properties"][0]["property_id"], r["properties"][0]["types"][0]
+    body = lambda a, b, **kw: dict(guest(property_id=pid, room_type_id=t["room_type_id"]), check_in=D(a), check_out=D(b)) | kw
+    st, r = call("POST", "/api/public/book", body(80, 83))
+    assert st == 400 and "at most 2 nights" in r["error"], r
+    st, r = call("POST", "/api/public/hold", dict(check_in=D(80), check_out=D(83), property_id=pid, room_type_id=t["room_type_id"], rooms=1))
+    assert st == 400 and "at most 2 nights" in r["error"], r
+
+    # max_rooms enforced on book and hold with a clear message
+    st, r = call("POST", "/api/public/book", body(80, 82, rooms=2, guests=2))
+    assert st == 400 and "Brahmotsavam" in r["error"] and "at most 1 room " in r["error"], r
+    st, r = call("POST", "/api/public/hold", dict(check_in=D(80), check_out=D(82), property_id=pid, room_type_id=t["room_type_id"], rooms=2))
+    assert st == 400 and "at most 1 room" in r["error"], r
+    st, r = call("POST", "/api/public/book", body(80, 82))
+    assert st == 200, r  # within the limits it books normally
+    st, r = call("POST", "/api/public/book", body(86, 88, rooms=2, guests=2))
+    assert st == 200 and r["rooms"] == 2, r  # outside the period two rooms are fine
+
+    # overlapping periods: the strictest limit wins and is the one named
+    ins("Festival day", 81, 81, nights=1)
+    db.commit()
+    st, r = search(80, 82)
+    assert st == 400 and "Festival day" in r["error"] and "at most 1 nights" in r["error"], r
+    assert search(80, 81)[0] == 200
+
+    # public info lists upcoming active periods for the booking form
+    names = [p["name"] for p in call("GET", "/api/public/info")[1]["peak_periods"]]
+    assert names == ["Brahmotsavam", "Loose cap", "Festival day"] and "Switched off" not in names, names
+    db.execute("DELETE FROM peak_periods"); db.commit()
+    assert search(80, 83)[0] == 200  # with the periods gone, the normal rules return
+    db.close()
+
+
 if __name__ == "__main__":
     try:
         test_health_and_backup()
         test_holds_and_limits()
+        test_peak_periods()
         test_all()
         print("ok")
     finally:

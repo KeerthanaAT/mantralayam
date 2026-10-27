@@ -133,6 +133,7 @@
   <form id="bform">
     <h2 id="bdlg-h">Confirm your booking</h2>
     <div class="summary"><dl class="facts" id="bsum"></dl></div>
+    <div class="msg" id="b_peak" role="note" hidden></div>
     <p class="msg" id="b_hold"></p>
     <span id="b_holdlive" role="status" aria-live="polite" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden"></span>
     <div class="row">
@@ -197,6 +198,9 @@ function h(tag, props, ...kids) {
   return e;
 }
 const S = { info: null, search: null, last: null };
+const peakLines = (ps) => ps.map((p) => h("div", null, h("strong", null, p.name), p.note ? h("p", null, p.note) : null,
+  p.max_nights || p.max_rooms ? h("p", { class: "small" }, "Online bookings in this period: " + [p.max_nights && `up to ${p.max_nights} nights`, p.max_rooms && `up to ${p.max_rooms} room${p.max_rooms > 1 ? "s" : ""}`].filter(Boolean).join(", ") + ".") : null));
+const peakOverlap = (a, b) => (S.info.peak_periods || []).filter((p) => p.start_date < b && p.end_date >= a);  // a period's end date is its last night
 const ID_TYPES = ["Aadhaar", "Voter ID", "Driving Licence", "Passport", "PAN", "Other"];
 
 function toast(msg) { const t = $("#toast"); t.replaceChildren(h("div", { class: "t" }, msg)); clearTimeout(toast.id); toast.id = setTimeout(() => t.replaceChildren(), 5000); }
@@ -222,6 +226,7 @@ function homeView(root) {
     h("div", null, h("label", { for: "s_prop" }, "Property (optional)"), h("select", { id: "s_prop", name: "property_id" }, opt("", "Any property", s.property_id), i.properties.map((p) => opt(p.id, p.name, s.property_id)))),
     h("div", null, h("label", { for: "s_type" }, "Room type (optional)"), h("select", { id: "s_type", name: "room_type_id" }, opt("", "Any type", s.room_type_id), i.room_types.map((t) => opt(t.id, t.name, s.room_type_id)))),
     h("p", { class: "stay span", id: "stay", "aria-live": "polite" }),
+    h("div", { class: "msg span", id: "peak", "aria-live": "polite", hidden: true }),
     h("button", { class: "btn", type: "submit" }, "Check availability"));
   const syncTypes = () => {
     const pr = i.properties.find((p) => String(p.id) === f.elements.property_id.value), sel = f.elements.room_type_id, cur = sel.value;
@@ -240,6 +245,8 @@ function homeView(root) {
     const a = f.elements.check_in.value, b = f.elements.check_out.value;
     const n = a && b ? Math.round((new Date(b) - new Date(a)) / 864e5) : 0;
     $("#stay").textContent = n > 0 ? `${fmtDate(a)} → ${fmtDate(b)} · ${n} night${n > 1 ? "s" : ""}` : "Choose your check-in and check-out dates.";
+    const ps = n > 0 ? peakOverlap(a, b) : [];
+    $("#peak").hidden = !ps.length; $("#peak").replaceChildren(...peakLines(ps));
   };
   f.elements.check_in.addEventListener("change", () => {
     const a = f.elements.check_in.value; if (!a) return;
@@ -259,6 +266,7 @@ async function runSearch(q, quiet) {
     S.result = r;
     if (!r.properties.length) out.replaceChildren(note("", h("strong", null, "No rooms are available for these dates and guests."), h("p", { class: "muted" }, "Try different dates, fewer guests, or another property.")));
     else out.replaceChildren(h("p", { class: "muted" }, `${r.nights} night${r.nights > 1 ? "s" : ""} · ${fmtDate(r.check_in)} to ${fmtDate(r.check_out)} · ${r.guests} guest${r.guests > 1 ? "s" : ""}`),
+      ...(r.peak.length ? [note("", ...peakLines(r.peak))] : []),
       ...groupByBuilding(r.properties).map(({ name, cards }) => h("section", { class: "bldg", "aria-label": name },
         h("h3", { class: "bldg-h" }, name),
         h("ul", { class: "types" }, cards.map(({ p, t }) => h("li", null, roomCard(p, t, r)))))));
@@ -328,6 +336,7 @@ async function openBook(p, t, r, opener) {
   finally { opener.disabled = false; }
   $("#b_idtype").replaceChildren(...ID_TYPES.map((x) => h("option", { value: x }, x)));
   $("#b_guests").value = r.guests; $("#b_err").hidden = true;
+  $("#b_peak").hidden = !r.peak.length; $("#b_peak").replaceChildren(...peakLines(r.peak));
   updateSummary(); $("#bdlg").showModal();
 }
 function updateSummary() {

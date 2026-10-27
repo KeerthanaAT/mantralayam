@@ -743,7 +743,7 @@ LIVE_SQL = "status IN ('Confirmed', 'Checked-In') AND (check_out > :today OR sta
 FUTURE_SQL = {"rooms": f"SELECT COUNT(*) FROM bookings WHERE room_id = :id AND {LIVE_SQL}",
               "room_types": f"SELECT COUNT(*) FROM bookings WHERE room_id IN (SELECT id FROM rooms WHERE room_type_id = :id) AND {LIVE_SQL}",
               "properties": f"SELECT COUNT(*) FROM bookings WHERE property_id = :id AND {LIVE_SQL}"}
-ACTIVE_LABEL = {"properties": "property", "room_types": "room type", "rooms": "room", "users": "user"}
+ACTIVE_LABEL = {"properties": "property", "room_types": "room type", "rooms": "room", "users": "user", "peak_periods": "peak period"}
 
 
 def raw_settings(conn):
@@ -757,6 +757,7 @@ def admin_data(conn, c):
         u["property_ids"] = [r[0] for r in conn.execute("SELECT property_id FROM user_properties WHERE user_id = ? ORDER BY 1", (u["id"],))]
     return {"properties": q("SELECT * FROM properties ORDER BY id"), "room_types": q("SELECT * FROM room_types ORDER BY tariff"),
             "rooms": q("SELECT r.*, p.name AS property, t.name AS type FROM rooms r JOIN properties p ON p.id = r.property_id JOIN room_types t ON t.id = r.room_type_id ORDER BY r.property_id, r.number"),
+            "peak_periods": q("SELECT * FROM peak_periods ORDER BY start_date DESC, id DESC"),
             "users": users, "roles": q("SELECT name, label FROM roles ORDER BY rowid"), "settings": raw_settings(conn),
             "setting_ranges": {k: list(v) for k, v in SETTING_RANGES.items()}}
 
@@ -892,6 +893,32 @@ def admin_active(conn, c):
     return {"ok": True}
 
 
+def admin_peak(conn, c):
+    b, pid = c.body, g.opt_int(c.body.get("id"))
+    name, note = text(b, "name", "Name", 1, 100), text(b, "note", "Note", 0, 500) or None
+    ci, co = day(b.get("start_date"), "Start date"), day(b.get("end_date"), "End date")
+    if co < ci:
+        raise UserError("The end date cannot be before the start date.")
+    if (co - ci).days > 366:
+        raise UserError("A peak period can last at most 366 days.")
+    limit = lambda k, label, hi: None if b.get(k) in (None, "") else g.to_int(b.get(k), f"{label} must be a whole number from 1 to {hi}, or empty for no limit.", 1, hi)
+    nights, rooms = limit("max_nights", "Most nights", 60), limit("max_rooms", "Most rooms", 20)
+
+    def work():
+        if pid and not exists(conn, "peak_periods", pid):
+            raise UserError("Peak period not found.", 404)
+        vals = (name, ci.isoformat(), co.isoformat(), nights, rooms, note)
+        if pid:
+            conn.execute("UPDATE peak_periods SET name = ?, start_date = ?, end_date = ?, max_nights = ?, max_rooms = ?, note = ? WHERE id = ?", (*vals, pid))
+            new = pid
+        else:
+            new = conn.execute("INSERT INTO peak_periods (name, start_date, end_date, max_nights, max_rooms, note) VALUES (?,?,?,?,?,?)", vals).lastrowid
+        audit(conn, c.user, "admin.peak_period_edit" if pid else "admin.peak_period_create", None, None, None,
+              f"{name}: {ci} to {co}, max nights {nights or 'none'}, max rooms {rooms or 'none'}")
+        return new
+    return {"id": g.write(conn, work)}
+
+
 def admin_settings(conn, c):
     b, new = c.body, {}
     for k, (lo, hi, label) in SETTING_RANGES.items():
@@ -934,7 +961,8 @@ ROUTES = [R("POST", r"/api/login", login, None), R("POST", r"/api/logout", logou
           R("GET", r"/api/admin/data", admin_data, SUPER), R("POST", r"/api/admin/properties", admin_property, SUPER),
           R("POST", r"/api/admin/room_types", rate_save, SUPER), R("POST", r"/api/admin/rooms", admin_room, SUPER),
           R("POST", r"/api/admin/users", admin_user, SUPER), R("POST", r"/api/admin/settings", admin_settings, SUPER),
-          R("POST", r"/api/admin/(?P<kind>properties|room_types|rooms|users)/(?P<id>\d+)/active", admin_active, SUPER),
+          R("POST", r"/api/admin/peak_periods", admin_peak, SUPER),
+          R("POST", r"/api/admin/(?P<kind>properties|room_types|rooms|users|peak_periods)/(?P<id>\d+)/active", admin_active, SUPER),
           R("POST", r"/api/me/profile", profile_save, ALL), R("POST", r"/api/me/password", password_change, ALL)]
 for _name, (_new, _from, _act, _roles) in ACTIONS.items():
     ROUTES.append(R("POST", rf"/api/bookings/(?P<id>\d+)/{_name}", (lambda n, f, a: lambda conn, c: set_status(conn, c, n, f, a))(_new, _from, _act), _roles))

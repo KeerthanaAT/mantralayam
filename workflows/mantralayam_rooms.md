@@ -13,7 +13,7 @@ Let pilgrims search room availability, book rooms, look up and cancel their own 
 | Export report to Google Sheets | not built, needs `credentials.json` |
 
 ## Inputs and data
-- Database: `.tmp/mantralayam.db` (override with env `MANTRALAYAM_DB`). Tables: `properties`, `room_types`, `rooms`, `bookings`, `room_status_events`, `settings`, `audit_log`, `users`, `roles`, `user_properties`. The tool never reseeds data; `migrate()` only adds missing columns or tables (currently `room_types.active`), once per process and database file.
+- Database: `.tmp/mantralayam.db` (override with env `MANTRALAYAM_DB`). Tables: `properties`, `room_types`, `rooms`, `bookings`, `room_status_events`, `settings`, `audit_log`, `users`, `roles`, `user_properties`. The tool never reseeds data; `migrate()` only adds missing columns or tables (currently `room_types.active` and the tables `holds` and `peak_periods`), once per process and database file.
 - Settings (table `settings`, defaults in the tool): `guest_booking_enabled`, `guest_max_rooms` (3), `guest_advance_days` (90), `guest_max_nights` (15), `guest_cancel_cutoff_hours` (24), `checkin_time` (14:00), `checkout_time` (11:00).
 
 ## How to run
@@ -29,7 +29,7 @@ python tools/test_mantralayam_rooms.py             # prints "ok"; runs on a COPY
 |---|---|
 | GET `/health` | liveness and DB check, `{"ok": true}` (503 if the DB is missing) |
 | GET `/images/<file>` | any png/jpg/webp/svg/ico in `web/images/` (no allowlist to edit; other types and path tricks give 404) |
-| GET `/api/public/info` | properties, room types, settings, today |
+| GET `/api/public/info` | properties, room types, settings, today, upcoming active `peak_periods` |
 | GET `/api/public/search?check_in&check_out&guests[&property_id&room_type_id]` | free room types grouped by property, with rooms needed for the party |
 | POST `/api/public/hold` `{property_id, room_type_id, rooms, check_in, check_out[, token]}` | holds the rooms for 10 minutes; returns `{token, expires_at, seconds, rooms}`. Passing the previous `token` replaces that hold |
 | POST `/api/public/release` `{token}` | frees a hold at once |
@@ -68,3 +68,5 @@ Errors return `{"error": "<message for the guest>"}` with 400, 403 (online booki
 - 2026-10-06: `replaceChildren(array)` stringifies the array (`[object HTMLDivElement]`); spread it instead.
 - Seed data: the "Non-AC Double" rooms list "AC" among their amenities. That is a data issue in `rooms.amenities`, not a code issue.
 - 2026-10-28: images were served from a hard-coded allowlist, so a new banner 404'd until the list was edited. Now any image file in `web/images/` is served. The rooms test used to assert the real DB had zero online bookings; real ones exist, so it now checks the count is unchanged. The `.venv` points to a missing Python 3.14; use Python 3.12 (`py -3.12`).
+- Peak periods (table `peak_periods`: name, start_date, end_date, optional max_nights, max_rooms, note, active). A period's end date is its last night, so a stay touches it when `start_date < check_out` and `end_date >= check_in`. `parse_stay()` tightens `max_nights` and `max_rooms` to the strictest overlapping active period (a period can only tighten the normal settings, never loosen them), so search, hold and book all enforce the same limits; refusals name the period, for example "During Brahmotsavam online bookings can be for at most 2 nights". The search response includes `peak` (the periods for the searched dates, with notes) and `info.peak_periods` lets the form show the note while the guest is still picking dates, in the results and in the confirm dialog. Existing bookings are never changed by a new period. Managed on the staff Admin page (super_admin only), see `workflows/mantralayam_staff.md`.
+- 2026-10-28 lesson: `migrate()` runs once per process per database path. Replacing the database file under a running server (as a UI test harness does) leaves the new copy without the new tables until the server restarts.
