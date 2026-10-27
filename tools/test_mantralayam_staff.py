@@ -94,7 +94,7 @@ def test_all():
     st, c = call("frontdesk", "POST", f"/api/bookings/{b['id']}/cancel", dict(reason="x"))
     assert st == 409 and "Check-out" in c["error"], c
     assert call("frontdesk", "POST", f"/api/bookings/{b['id']}/checkout")[1]["status"] == "Checked-Out"
-    ev = [e for e in call("housekeeping", "GET", "/api/room_events")[1] if e["room_id"] == r1["id"]]
+    ev = [e for e in call("housekeeping", "GET", "/api/room_events")[1] if e["room_id"] == r1["id"] and e["kind"] in s.CLEANING]  # other (older) blocks on the live data are not this test's business
     assert [e["kind"] for e in ev] == ["cleaning_required"], ev
     assert call("frontdesk", "POST", "/api/bookings", guest(r1))[0] == 409, "room awaiting cleaning"
     assert call("frontdesk", "POST", f"/api/room_events/{ev[0]['id']}/start_cleaning")[0] == 200
@@ -144,6 +144,91 @@ def test_all():
     assert not {a for a in actions if a.startswith("auth.")}, "property-less entries are for super admins only"
     assert {"auth.login", "auth.login_failed"} <= {a["action"] for a in call("admin", "GET", "/api/audit")[1]}
     assert all(a["property_id"] in (1, 2) for a in call("manager", "GET", "/api/audit")[1] if a["property_id"])
+
+    # menu pages by role: the server decides, and enforces it on every route
+    pages = lambda u: [p["key"] for p in call(u, "GET", "/api/meta")[1]["pages"]]
+    assert pages("admin") == pages("manager") and "reports" in pages("admin") and "rates" in pages("admin")
+    assert "reports" not in pages("frontdesk") and "rates" not in pages("frontdesk") and "audit" not in pages("frontdesk") and "settings" in pages("frontdesk")
+    assert pages("housekeeping") == ["today", "rooms", "status", "notifications", "settings"]
+    for u in ("frontdesk", "housekeeping", "viewer"):
+        for path in ("/api/reports", "/api/room_types", "/api/settings"):
+            assert call(u, "GET", path)[0] == 403, (u, path)
+    assert call("housekeeping", "GET", "/api/bookings")[0] == 403 and call("housekeeping", "GET", "/api/guests")[0] == 403 and call("housekeeping", "GET", "/api/calendar")[0] == 403
+    assert call("frontdesk", "POST", "/api/settings/times", dict(checkin_time="13:00", checkout_time="10:00"))[0] == 403
+    assert call("manager", "POST", "/api/settings/times", dict(checkin_time="13:00", checkout_time="10:00"))[0] == 403
+    assert call("admin", "POST", "/api/settings/times", dict(checkin_time="25:00", checkout_time="10:00"))[0] == 400
+
+    # edit and reschedule: never double-book
+    ra = free_room("frontdesk", skip=(r1["id"], r2["id"], r3["id"]))
+    st, e1 = call("frontdesk", "POST", "/api/bookings", guest(ra, check_in=D(2), check_out=D(4), guest_name="Edit Me", phone="9111111111"))
+    assert st == 200, e1
+    assert call("viewer", "POST", f"/api/bookings/{e1['id']}/edit", dict(guest_name="X", phone="9111111111", guests=1))[0] == 403
+    assert call("frontdesk", "POST", f"/api/bookings/{e1['id']}/edit", dict(guest_name="", phone="9111111111", guests=1))[0] == 400
+    assert call("frontdesk", "POST", f"/api/bookings/{e1['id']}/edit", dict(guest_name="Edited", phone="1", guests=1))[0] == 400
+    assert call("frontdesk", "POST", f"/api/bookings/{e1['id']}/edit", dict(guest_name="Edited", phone="9222222222", guests=99))[0] == 400
+    out = call("frontdesk", "POST", f"/api/bookings/{e1['id']}/edit", dict(guest_name="Edited", phone="9222222222", guests=2, remarks="late"))[1]
+    assert out["guest_name"] == "Edited" and out["guests"] == 2 and out["remarks"] == "late"
+    st, e2 = call("frontdesk", "POST", "/api/bookings", guest(ra, check_in=D(6), check_out=D(8)))
+    assert st == 200
+    st, out = call("frontdesk", "POST", f"/api/bookings/{e2['id']}/reschedule", dict(check_in=D(3), check_out=D(7)))
+    assert st == 409 and "already booked" in out["error"], out
+    assert call("frontdesk", "POST", f"/api/bookings/{e2['id']}/reschedule", dict(check_in=D(-1), check_out=D(7)))[0] == 400
+    assert call("frontdesk", "POST", f"/api/bookings/{e2['id']}/reschedule", dict(check_in=D(7), check_out=D(7)))[0] == 400
+    out = call("frontdesk", "POST", f"/api/bookings/{e2['id']}/reschedule", dict(check_in=D(5), check_out=D(7)))[1]
+    assert (out["check_in"], out["check_out"]) == (D(5), D(7)), out
+    assert call("frontdesk", "POST", f"/api/bookings/{e2['id']}/reschedule", dict(check_in=D(5), check_out=D(7)))[0] == 200, "own dates do not conflict with itself"
+
+    # calendar, guests, notifications (before e2 is cancelled)
+    cal = call("frontdesk", "GET", "/api/calendar", dict(start=D(0), days=7, property_id=ra["property_id"]))[1]
+    row_ = next(r for r in cal["rooms"] if r["id"] == ra["id"])
+    assert len(cal["days"]) == 7 and row_["cells"][2]["status"] == "booked" and row_["cells"][0] is None and row_["cells"][4] is None
+    assert call("frontdesk", "GET", "/api/calendar", dict(days=99))[0] == 400
+    assert call("frontdesk", "POST", f"/api/bookings/{e2['id']}/cancel", dict(reason="test"))[0] == 200
+    assert call("frontdesk", "POST", f"/api/bookings/{e2['id']}/reschedule", dict(check_in=D(5), check_out=D(7)))[0] == 409, "cancelled bookings cannot be moved"
+    assert call("frontdesk", "POST", f"/api/bookings/{e2['id']}/edit", dict(guest_name="Z", phone="9222222222", guests=1))[0] == 409
+    gl = call("frontdesk", "GET", "/api/guests", dict(q="edited"))[1]
+    assert [x["phone"] for x in gl] == ["9222222222"], gl
+    prof = call("frontdesk", "GET", "/api/guests/profile", dict(phone="9222222222"))[1]
+    assert len(prof["bookings"]) == 1 and call("frontdesk", "GET", "/api/guests/profile", dict(phone="9000000000"))[0] == 404
+    assert call("frontdesk", "POST", "/api/guests/edit", dict(phone="9222222222", guest_name="Renamed", new_phone="9333333333"))[1]["updated"] == 1
+    assert call("viewer", "POST", "/api/guests/edit", dict(phone="9333333333", guest_name="Hack"))[0] in (401, 403)
+    nt = call("frontdesk", "GET", "/api/notifications")[1]
+    assert any(i["kind"] == "new" for i in nt["items"]) and any(i["kind"] == "cancelled" for i in nt["items"]) and nt["unread"] > 0
+    assert call("frontdesk", "POST", "/api/notifications/seen")[0] == 200 and call("frontdesk", "GET", "/api/notifications")[1]["unread"] == 0
+    assert all(i["kind"] == "cleaning" for i in call("housekeeping", "GET", "/api/notifications")[1]["items"])
+
+    # reports
+    rp = call("manager", "GET", "/api/reports", {"from": D(-5), "to": D(30)})[1]
+    assert rp["bookings"] >= 3 and rp["revenue"] > 0 and sum(d["bookings"] for d in rp["by_day"]) == rp["bookings"] and "Cancelled" in rp["by_status"]
+    assert call("manager", "GET", "/api/reports", {"from": D(5), "to": D(1)})[0] == 400 and call("manager", "GET", "/api/reports", {"from": D(-400), "to": D(1)})[0] == 400
+
+    # rooms & rates
+    st, t = call("manager", "POST", "/api/room_types", dict(name="Test Suite", capacity=3, tariff=999, description="x"))
+    assert st == 200 and call("manager", "POST", "/api/room_types", dict(name="Test Suite", capacity=3, tariff=1))[0] == 409
+    assert call("manager", "POST", "/api/room_types", dict(id=t["id"], name="Test Suite 2", capacity=0, tariff=1))[0] == 400
+    assert call("manager", "POST", "/api/room_types", dict(id=t["id"], name="Test Suite 2", capacity=4, tariff="abc"))[0] == 400
+    assert call("manager", "POST", "/api/room_types", dict(id=t["id"], name="Test Suite 2", capacity=4, tariff=1200))[0] == 200
+    assert call("manager", "POST", "/api/room_types/1/delete")[0] == 409, "types in use cannot be deleted"
+    assert call("manager", "POST", f"/api/room_types/{t['id']}/delete")[0] == 200 and call("manager", "POST", f"/api/room_types/{t['id']}/delete")[0] == 404
+
+    # settings and own profile
+    st, cfg = call("manager", "GET", "/api/settings")
+    assert st == 200 and {p["id"] for p in cfg["properties"]} == {1, 2}
+    assert call("manager", "POST", "/api/settings/property", dict(id=3, phone="9440000103"))[0] == 403
+    assert call("manager", "POST", "/api/settings/property", dict(id=1, phone="abc"))[0] == 400
+    assert call("manager", "POST", "/api/settings/property", dict(id=1, phone="9440000101", address="Temple Road", contact_person="X", description="d", facilities="f"))[0] == 200
+    assert call("admin", "POST", "/api/settings/times", dict(checkin_time="13:00", checkout_time="10:00"))[0] == 200
+    assert call("frontdesk", "POST", "/api/me/profile", dict(full_name=""))[0] == 400
+    assert call("frontdesk", "POST", "/api/me/profile", dict(full_name="New Name"))[1]["user"]["full_name"] == "New Name"
+    assert call("frontdesk", "POST", "/api/me/password", dict(current="bad", new="LongEnough1"))[0] == 400
+    assert call("frontdesk", "POST", "/api/me/password", dict(current=PW, new="short"))[0] == 400
+    TOKENS["fd2"] = s.dispatch("POST", "/api/login", None, {"username": "frontdesk", "password": PW}, "127.0.0.1")[2]
+    assert call("frontdesk", "POST", "/api/me/password", dict(current=PW, new="LongEnough1"))[0] == 200
+    assert call("fd2", "GET", "/api/meta")[0] == 401, "other sessions end after a password change"
+    assert call("frontdesk", "GET", "/api/meta")[0] == 200
+    s.FAILS.clear()
+    assert login("frontdesk", PW)[0] == 401 and login("frontdesk", "LongEnough1")[0] == 200
+
 
     # logout kills the session; sessions of deactivated users die too
     assert call("viewer", "POST", "/api/logout")[0] == 200 and call("viewer", "GET", "/api/meta")[0] == 401

@@ -27,6 +27,7 @@ from mantralayam_rooms import UserError
 
 STATIC = {"/": ("staff.html", "text/html"), "/staff": ("staff.html", "text/html"), "/staff.css": ("staff.css", "text/css"),
           "/tokens.css": ("tokens.css", "text/css"), "/shared.css": ("shared.css", "text/css")}
+IMAGES = {"/images/logo-transparent.png": "image/png"}  # served from <project root>/images, allowlisted
 ALL = {"super_admin", "property_manager", "front_desk", "housekeeping", "viewer"}
 MGR = {"super_admin", "property_manager"}
 DESK = MGR | {"front_desk"}
@@ -131,7 +132,8 @@ def meta(conn, c):
         "properties": [dict(r) for r in conn.execute(f"SELECT id, name FROM properties WHERE id IN ({marks(u['props'])}) ORDER BY id", u["props"])],
         "room_types": [dict(r) for r in conn.execute("SELECT id, name FROM room_types ORDER BY tariff")],
         "id_types": list(g.ID_TYPES), "issues": list(ISSUES), "kinds": list(KINDS),
-        "can": {"book": u["role"] in DESK, "status": u["role"] in DESK, "clean": u["role"] in CLEANERS, "audit": u["role"] in MGR}}
+        "can": {"book": u["role"] in DESK, "status": u["role"] in DESK, "clean": u["role"] in CLEANERS, "audit": u["role"] in MGR},
+        "pages": [{"key": k, "label": l} for k, l, roles in PAGES if u["role"] in roles]}
 
 
 # ---------- helpers ----------
@@ -413,13 +415,335 @@ def audit_view(conn, c):
     return [dict(r) for r in conn.execute(sql + " ORDER BY l.id DESC LIMIT 500", args)]
 
 
+# ---------- menu pages, extra screens ----------
+FRONT = DESK | {"viewer"}  # everyone who may see guest details
+PAGES = [("today", "Dashboard", ALL), ("bookings", "Bookings", FRONT), ("calendar", "Calendar", FRONT), ("rooms", "Rooms", ALL),
+         ("status", "Room status", ALL), ("guests", "Guests", FRONT), ("rates", "Rooms & rates", MGR), ("reports", "Reports", MGR),
+         ("notifications", "Notifications", ALL), ("audit", "Audit log", MGR), ("settings", "Settings", ALL)]
+STATUS_LIVE = ("Confirmed", "Checked-In", "Checked-Out")
+
+
+def now_iso():
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def text(b, key, label, lo=0, hi=200):
+    v = str(b.get(key) or "").strip()
+    if len(v) < lo or len(v) > hi:
+        raise UserError(f"{label} is required (up to {hi} characters)." if lo else f"{label} must be {hi} characters or fewer.")
+    return v
+
+
+def conflict(conn, room, ci, co, skip_id):
+    """Why room is not free for [ci, co), ignoring booking skip_id; None if free."""
+    b = conn.execute("SELECT id, check_in, check_out FROM bookings WHERE room_id = ? AND id != ? AND status IN ('Confirmed', 'Checked-In') "
+                     "AND check_in < ? AND check_out > ?", (room["id"], skip_id, co, ci)).fetchone()
+    if b:
+        return f"Room {room['number']} is already booked (booking #{b['id']}, {b['check_in']} to {b['check_out']})."
+    e = conn.execute("SELECT kind FROM room_status_events WHERE room_id = ? AND active = 1 AND start_date < ? AND (end_date IS NULL OR end_date > ?) "
+                     "AND (kind NOT IN ('cleaning_required', 'in_cleaning') OR ? <= ?)", (room["id"], co, ci, ci, g.today().isoformat())).fetchone()
+    return f"Room {room['number']} is {LABEL[e['kind']]} for those dates." if e else None
+
+
+def edit_booking(conn, c):
+    b = c.body
+    name, remarks = text(b, "guest_name", "Guest name", 1, 100), text(b, "remarks", "Remarks", 0, 500)
+    phone = g.norm_phone(b.get("phone"))
+    guests = g.to_int(b.get("guests"), "Number of guests must be at least 1.", 1, 200)
+
+    def work():
+        cur = get_booking(conn, c.user, c.args["id"])
+        if cur["status"] not in ("Confirmed", "Checked-In"):
+            raise UserError(f"A {cur['status']} booking can no longer be edited.", 409)
+        cap = conn.execute("SELECT capacity FROM rooms WHERE id = ?", (cur["room_id"],)).fetchone()[0]
+        if guests > cap:
+            raise UserError(f"Room {cur['room']} sleeps at most {cap} guests.")
+        conn.execute("UPDATE bookings SET guest_name = ?, phone = ?, guests = ?, remarks = ? WHERE id = ?", (name, phone, guests, remarks or None, cur["id"]))
+        audit(conn, c.user, "booking.edit", cur["property_id"], cur["room_id"], f"{cur['guest_name']}, {cur['phone']}, {cur['guests']} guests", f"{name}, {phone}, {guests} guests")
+    g.write(conn, work)
+    return row(get_booking(conn, c.user, c.args["id"]))
+
+
+def reschedule_booking(conn, c):
+    b = c.body
+    ci, co = day(b.get("check_in"), "Check-in"), day(b.get("check_out"), "Check-out")
+    if ci < g.today():
+        raise UserError("Check-in date cannot be in the past.")
+    if co <= ci:
+        raise UserError("Check-out must be after check-in.")
+
+    def work():
+        cur = get_booking(conn, c.user, c.args["id"])
+        if cur["status"] != "Confirmed":
+            raise UserError(f"Only Confirmed bookings can be rescheduled (this one is {cur['status']}).", 409)
+        want = g.opt_int(b.get("room_id")) or cur["room_id"]
+        if cur["group_id"] and want != cur["room_id"]:
+            raise UserError("A room in an online group booking cannot be moved to another room.")
+        room = conn.execute("SELECT r.*, t.tariff FROM rooms r JOIN room_types t ON t.id = r.room_type_id WHERE r.id = ? AND r.property_id = ? AND r.active = 1",
+                            (want, cur["property_id"])).fetchone()
+        if not room:
+            raise UserError("Please choose an active room in the same property.")
+        if cur["guests"] > room["capacity"]:
+            raise UserError(f"Room {room['number']} sleeps at most {room['capacity']} guests.")
+        why = conflict(conn, room, ci.isoformat(), co.isoformat(), cur["id"])
+        if why:
+            raise UserError(why + " Choose different dates or another room.", 409)
+        conn.execute("UPDATE bookings SET room_id = ?, check_in = ?, check_out = ?, amount = ? WHERE id = ?",
+                     (room["id"], ci.isoformat(), co.isoformat(), room["tariff"] * (co - ci).days, cur["id"]))
+        audit(conn, c.user, "booking.reschedule", cur["property_id"], room["id"], f"room {cur['room']}, {cur['check_in']} to {cur['check_out']}",
+              f"room {room['number']}, {ci} to {co}")
+    g.write(conn, work)
+    return row(get_booking(conn, c.user, c.args["id"]))
+
+
+def calendar_view(conn, c):
+    ids = scope(c.user, c.q.get("property_id"))
+    start = day(c.q.get("start") or g.today().isoformat(), "Start date")
+    n = g.to_int(c.q.get("days") or 7, "Days must be between 1 and 31.", 1, 31)
+    days = [(start + timedelta(days=i)).isoformat() for i in range(n)]
+    end = (start + timedelta(days=n)).isoformat()
+    rooms = conn.execute(f"SELECT r.id, r.number, r.floor, r.property_id, p.name AS property, t.name AS type FROM rooms r JOIN properties p ON p.id = r.property_id "
+                         f"JOIN room_types t ON t.id = r.room_type_id WHERE r.active = 1 AND r.property_id IN ({marks(ids)}) ORDER BY p.id, r.floor, r.number", ids).fetchall()
+    rid = [r["id"] for r in rooms]
+    bks, evs = defaultdict(list), defaultdict(list)
+    for x in conn.execute(f"SELECT id, room_id, guest_name, status, check_in, check_out FROM bookings WHERE room_id IN ({marks(rid)}) AND status IN ('Confirmed', 'Checked-In') "
+                          "AND check_in < ? AND check_out > ?", (*rid, end, start.isoformat())):
+        bks[x["room_id"]].append(x)
+    for x in conn.execute(f"SELECT id, room_id, kind, reason, start_date, end_date FROM room_status_events WHERE active = 1 AND room_id IN ({marks(rid)}) AND start_date < ? "
+                          "AND (end_date IS NULL OR end_date > ?)", (*rid, end, start.isoformat())):
+        evs[x["room_id"]].append(x)
+    out = []
+    for r in rooms:
+        cells = []
+        for d in days:
+            cell = None
+            for e in evs[r["id"]]:
+                if e["start_date"] <= d and (e["end_date"] is None or e["end_date"] > d):
+                    cell = {"status": {"internal_block": "blocked", "in_cleaning": "cleaning", "cleaning_required": "cleaning"}.get(e["kind"], e["kind"]), "note": LABEL[e["kind"]]}
+                    break
+            if not cell:
+                for x in bks[r["id"]]:
+                    if x["check_in"] <= d < x["check_out"]:
+                        cell = {"status": "occupied" if x["status"] == "Checked-In" else "booked", "note": x["guest_name"], "booking_id": x["id"]}
+                        break
+            cells.append(cell)
+        out.append({"id": r["id"], "number": r["number"], "property": r["property"], "property_id": r["property_id"], "type": r["type"], "cells": cells})
+    return {"start": start.isoformat(), "days": days, "rooms": out}
+
+
+def phone_key(v):
+    return re.sub(r"\D", "", str(v or ""))[-10:]
+
+
+def guests_list(conn, c):
+    ids, q = scope(c.user, c.q.get("property_id")), c.q.get("q", "").strip()[:60].lower()
+    by = {}
+    for b in conn.execute(f"SELECT guest_name, phone, check_in, status, amount FROM bookings WHERE property_id IN ({marks(ids)}) ORDER BY check_in, id", ids):
+        gst = by.setdefault(phone_key(b["phone"]), {"name": "", "phone": "", "stays": 0, "last_stay": "", "spent": 0})
+        gst.update(name=b["guest_name"], phone=b["phone"], last_stay=b["check_in"])
+        if b["status"] in STATUS_LIVE:
+            gst["stays"] += 1
+            gst["spent"] += b["amount"] or 0
+    rows = [v for v in by.values() if not q or q in v["name"].lower() or q in v["phone"]]
+    rows.sort(key=lambda v: v["last_stay"], reverse=True)
+    return rows[:300]
+
+
+def guest_profile(conn, c):
+    key = phone_key(c.q.get("phone"))
+    if len(key) != 10:
+        raise UserError("Please give the guest's mobile number.")
+    rows = [row(r) for r in conn.execute(BOOKING_SQL + f" WHERE b.property_id IN ({marks(c.user['props'])}) ORDER BY b.check_in DESC, b.id DESC", c.user["props"])
+            if phone_key(r["phone"]) == key]
+    if not rows:
+        raise UserError("Guest not found.", 404)
+    return {"name": rows[0]["guest_name"], "phone": rows[0]["phone"], "bookings": rows,
+            "spent": sum(b["amount"] or 0 for b in rows if b["status"] in STATUS_LIVE), "stays": sum(1 for b in rows if b["status"] in STATUS_LIVE)}
+
+
+def guest_edit(conn, c):
+    key, name = phone_key(c.body.get("phone")), text(c.body, "guest_name", "Guest name", 1, 100)
+    new_phone = g.norm_phone(c.body.get("new_phone") or c.body.get("phone"))
+
+    def work():
+        mine = [r for r in conn.execute(f"SELECT id, phone FROM bookings WHERE property_id IN ({marks(c.user['props'])})", c.user["props"]) if phone_key(r["phone"]) == key]
+        if not mine:
+            raise UserError("Guest not found.", 404)
+        for r in mine:
+            conn.execute("UPDATE bookings SET guest_name = ?, phone = ? WHERE id = ?", (name, new_phone, r["id"]))
+        audit(conn, c.user, "guest.edit", None, None, key, phone_key(new_phone), f"{len(mine)} booking(s) updated, name {name}")
+        return len(mine)
+    return {"updated": g.write(conn, work), "phone": new_phone}
+
+
+def reports(conn, c):
+    ids = scope(c.user, c.q.get("property_id"))
+    a, z = day(c.q.get("from") or (g.today() - timedelta(days=29)).isoformat(), "From date"), day(c.q.get("to") or g.today().isoformat(), "To date")
+    if z < a:
+        raise UserError("The end date must not be before the start date.")
+    if (z - a).days > 366:
+        raise UserError("Please choose a range of at most one year.")
+    rows = conn.execute(f"SELECT b.check_in, b.status, b.amount, p.name AS property FROM bookings b JOIN properties p ON p.id = b.property_id "
+                        f"WHERE b.property_id IN ({marks(ids)}) AND b.check_in >= ? AND b.check_in <= ?", (*ids, a.isoformat(), z.isoformat())).fetchall()
+    stat, daily, prop = defaultdict(int), defaultdict(lambda: [0, 0]), defaultdict(lambda: [0, 0])
+    for r in rows:
+        stat[r["status"]] += 1
+        if r["status"] in STATUS_LIVE:
+            for m, k in ((daily, r["check_in"]), (prop, r["property"])):
+                m[k][0] += 1
+                m[k][1] += r["amount"] or 0
+    return {"from": a.isoformat(), "to": z.isoformat(), "total": len(rows), "by_status": dict(stat),
+            "bookings": sum(v[0] for v in daily.values()), "revenue": sum(v[1] for v in daily.values()),
+            "by_day": [{"date": k, "bookings": v[0], "revenue": v[1]} for k, v in sorted(daily.items())],
+            "by_property": [{"property": k, "bookings": v[0], "revenue": v[1]} for k, v in sorted(prop.items())]}
+
+
+def notifications(conn, c):
+    ids = scope(c.user, None)
+    since = (datetime.now() - timedelta(days=30)).isoformat(timespec="seconds")
+    seen = conn.execute("SELECT value FROM settings WHERE key = ?", (f"notif_seen_{c.user['id']}",)).fetchone()
+    seen = seen[0] if seen else ""
+    items = []
+    if c.user["role"] in FRONT:
+        for b in conn.execute(BOOKING_SQL.replace("b.amount,", "b.amount, b.created_at, b.status_at,") + " WHERE b.property_id IN (%s) AND (b.created_at >= ? OR (b.status = 'Cancelled' AND b.status_at >= ?))" % marks(ids), (*ids, since, since)):
+            nm = f"#{b['id']} {b['guest_name']}, room {b['room']} ({b['property']}), {b['check_in']} to {b['check_out']}"
+            if b["created_at"] >= since:
+                items.append({"kind": "new", "ts": b["created_at"], "text": f"New booking {nm}" + (" (online)" if b["source"] == "online" else "")})
+            if b["status"] == "Cancelled" and b["status_at"] >= since:
+                items.append({"kind": "cancelled", "ts": b["status_at"], "text": f"Cancelled booking {nm}" + (f". Reason: {b['cancel_reason']}" if b["cancel_reason"] else "")})
+    for e in conn.execute(f"SELECT e.created_at, r.number, p.name FROM room_status_events e JOIN rooms r ON r.id = e.room_id JOIN properties p ON p.id = r.property_id "
+                          f"WHERE e.kind = 'cleaning_required' AND e.active = 1 AND r.property_id IN ({marks(ids)})", ids):
+        items.append({"kind": "cleaning", "ts": e["created_at"], "text": f"Room {e['number']} ({e['name']}) needs cleaning"})
+    items = sorted(items, key=lambda i: i["ts"], reverse=True)[:100]
+    for i in items:
+        i["unread"] = i["ts"] > seen
+    return {"items": items, "unread": sum(i["unread"] for i in items)}
+
+
+def notifications_seen(conn, c):
+    g.write(conn, lambda: conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (f"notif_seen_{c.user['id']}", now_iso())))
+    return {"ok": True}
+
+
+def rate_types(conn, c):
+    return [dict(r) for r in conn.execute("SELECT t.*, (SELECT COUNT(*) FROM rooms r WHERE r.room_type_id = t.id) AS rooms FROM room_types t ORDER BY t.tariff")]
+
+
+def rate_save(conn, c):
+    b = c.body
+    name, desc = text(b, "name", "Name", 1, 60), text(b, "description", "Description", 0, 300)
+    cap = g.to_int(b.get("capacity"), "Capacity must be between 1 and 100.", 1, 100)
+    try:
+        tariff = float(b.get("tariff"))
+    except (TypeError, ValueError):
+        tariff = -1
+    if not 0 <= tariff <= 1_000_000:
+        raise UserError("Tariff must be a number between 0 and 1000000.")
+    tid = g.opt_int(b.get("id"))
+
+    def work():
+        if conn.execute("SELECT 1 FROM room_types WHERE name = ? AND id IS NOT ?", (name, tid)).fetchone():
+            raise UserError("A room type with that name already exists.", 409)
+        if tid:
+            if not conn.execute("SELECT 1 FROM room_types WHERE id = ?", (tid,)).fetchone():
+                raise UserError("Room type not found.", 404)
+            conn.execute("UPDATE room_types SET name = ?, capacity = ?, description = ?, tariff = ? WHERE id = ?", (name, cap, desc or None, tariff, tid))
+        else:
+            tid_ = conn.execute("INSERT INTO room_types (name, capacity, description, tariff) VALUES (?,?,?,?)", (name, cap, desc or None, tariff)).lastrowid
+        audit(conn, c.user, "rate.edit" if tid else "rate.create", None, None, None, f"{name}: sleeps {cap}, Rs {tariff:g}")
+        return tid or tid_
+    return {"id": g.write(conn, work)}
+
+
+def rate_delete(conn, c):
+    def work():
+        t = conn.execute("SELECT * FROM room_types WHERE id = ?", (c.args["id"],)).fetchone()
+        if not t:
+            raise UserError("Room type not found.", 404)
+        n = conn.execute("SELECT COUNT(*) FROM rooms WHERE room_type_id = ?", (t["id"],)).fetchone()[0]
+        if n:
+            raise UserError(f"{t['name']} is used by {n} room(s), so it cannot be deleted. Move or remove those rooms first.", 409)
+        conn.execute("DELETE FROM room_types WHERE id = ?", (t["id"],))
+        audit(conn, c.user, "rate.delete", None, None, t["name"], None)
+    g.write(conn, work)
+    return {"ok": True}
+
+
+def settings_get(conn, c):
+    s = g.settings(conn)
+    props = [dict(r) for r in conn.execute(f"SELECT id, name, address, contact_person, phone, description, facilities FROM properties WHERE id IN ({marks(c.user['props'])}) ORDER BY id", c.user["props"])]
+    return {"properties": props, "checkin_time": s["checkin_time"], "checkout_time": s["checkout_time"], "can_times": c.user["role"] == "super_admin"}
+
+
+def property_save(conn, c):
+    b = c.body
+    vals = [text(b, k, k.replace("_", " ").capitalize(), 0, n) or None for k, n in (("address", 300), ("contact_person", 100), ("phone", 30), ("description", 1000), ("facilities", 1000))]
+    if vals[2] and not re.fullmatch(r"[\d\s+\-]{6,30}", vals[2]):
+        raise UserError("Phone may contain only digits, spaces, + and -.")
+    pid = scope(c.user, b.get("id"))[0] if b.get("id") else None
+    if pid is None:
+        raise UserError("Please choose a property.")
+    g.write(conn, lambda: (conn.execute("UPDATE properties SET address = ?, contact_person = ?, phone = ?, description = ?, facilities = ? WHERE id = ?", (*vals, pid)),
+                           audit(conn, c.user, "settings.property", pid, None, None, "profile updated")))
+    return {"ok": True}
+
+
+def times_save(conn, c):
+    t = {k: str(c.body.get(k) or "") for k in ("checkin_time", "checkout_time")}
+    if not all(re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", v) for v in t.values()):
+        raise UserError("Times must look like 14:00.")
+
+    def work():
+        for k, v in t.items():
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (k, v))
+        audit(conn, c.user, "settings.times", None, None, None, f"check-in {t['checkin_time']}, check-out {t['checkout_time']}")
+    g.write(conn, work)
+    return {"ok": True}
+
+
+def profile_save(conn, c):
+    name = text(c.body, "full_name", "Name", 1, 100)
+    g.write(conn, lambda: (conn.execute("UPDATE users SET full_name = ? WHERE id = ?", (name, c.user["id"])), audit(conn, c.user, "user.profile", reason="name changed")))
+    c.user["full_name"] = name
+    return meta(conn, c)
+
+
+def password_change(conn, c):
+    cur, new = str(c.body.get("current") or ""), str(c.body.get("new") or "")
+    key, now = (c.ip, "pw:" + c.user["username"].lower()), time.time()
+    FAILS[key] = [t for t in FAILS[key] if now - t < 600]
+    if len(FAILS[key]) >= 5:
+        raise UserError("Too many failed attempts. Please wait a few minutes and try again.", 429)
+    u = conn.execute("SELECT pw_hash, salt FROM users WHERE id = ?", (c.user["id"],)).fetchone()
+    if not check_pw(cur, u["pw_hash"], u["salt"]):
+        FAILS[key].append(now)
+        raise UserError("Your current password is not correct.")
+    if len(new) < 8 or len(new) > 200:
+        raise UserError("The new password must be at least 8 characters.")
+    if new == cur:
+        raise UserError("The new password must be different from the current one.")
+    h, salt = make_hash(new)
+    g.write(conn, lambda: (conn.execute("UPDATE users SET pw_hash = ?, salt = ? WHERE id = ?", (h, salt, c.user["id"])), audit(conn, c.user, "user.password_change")))
+    for t in [t for t, v in SESSIONS.items() if v[0] == c.user["id"] and t != c.args.get("_token")]:
+        SESSIONS.pop(t, None)  # other devices must sign in again
+    return {"ok": True}
+
+
 R = lambda method, pattern, fn, roles: (method, re.compile(pattern + r"\Z"), fn, roles)
 ROUTES = [R("POST", r"/api/login", login, None), R("POST", r"/api/logout", logout, ALL), R("GET", r"/api/meta", meta, ALL),
-          R("GET", r"/api/dashboard", dashboard, ALL), R("GET", r"/api/rooms", rooms_view, ALL), R("GET", r"/api/bookings", bookings_list, ALL),
+          R("GET", r"/api/dashboard", dashboard, ALL), R("GET", r"/api/rooms", rooms_view, ALL), R("GET", r"/api/bookings", bookings_list, FRONT),
           R("POST", r"/api/bookings", create_booking, DESK), R("GET", r"/api/room_events", events_list, ALL), R("POST", r"/api/room_events", create_event, DESK),
           R("POST", r"/api/room_events/(?P<id>\d+)/release", lambda conn, c: event_action(conn, c, True), CLEANERS),
           R("POST", r"/api/room_events/(?P<id>\d+)/start_cleaning", lambda conn, c: event_action(conn, c, False), CLEANERS),
-          R("GET", r"/api/audit", audit_view, MGR)]
+          R("GET", r"/api/audit", audit_view, MGR),
+          R("POST", r"/api/bookings/(?P<id>\d+)/edit", edit_booking, DESK), R("POST", r"/api/bookings/(?P<id>\d+)/reschedule", reschedule_booking, DESK),
+          R("GET", r"/api/calendar", calendar_view, FRONT), R("GET", r"/api/guests", guests_list, FRONT), R("GET", r"/api/guests/profile", guest_profile, FRONT),
+          R("POST", r"/api/guests/edit", guest_edit, DESK), R("GET", r"/api/reports", reports, MGR),
+          R("GET", r"/api/notifications", notifications, ALL), R("POST", r"/api/notifications/seen", notifications_seen, ALL),
+          R("GET", r"/api/room_types", rate_types, MGR), R("POST", r"/api/room_types", rate_save, MGR), R("POST", r"/api/room_types/(?P<id>\d+)/delete", rate_delete, MGR),
+          R("GET", r"/api/settings", settings_get, MGR), R("POST", r"/api/settings/property", property_save, MGR),
+          R("POST", r"/api/settings/times", times_save, frozenset({"super_admin"})),
+          R("POST", r"/api/me/profile", profile_save, ALL), R("POST", r"/api/me/password", password_change, ALL)]
 for _name, (_new, _from, _act, _roles) in ACTIONS.items():
     ROUTES.append(R("POST", rf"/api/bookings/(?P<id>\d+)/{_name}", (lambda n, f, a: lambda conn, c: set_status(conn, c, n, f, a))(_new, _from, _act), _roles))
 
@@ -479,6 +803,8 @@ class Handler(BaseHTTPRequestHandler):
         if url.path in STATIC:
             name, ctype = STATIC[url.path]
             return self.send(200, (g.ROOT / "web" / name).read_bytes(), ctype)
+        if url.path in IMAGES:
+            return self.send(200, (g.ROOT / url.path.lstrip("/")).read_bytes(), IMAGES[url.path])
         self.reply("GET", url, None)
 
     def do_POST(self):

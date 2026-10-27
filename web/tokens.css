@@ -1,12 +1,57 @@
+@import url("https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap");
 /* Design tokens shared by the guest website (/) and the staff app (/staff).
-   The palette, fonts and spacing live here only: change a value once and both sites follow. */
+   Theme: dark temple-brown, cream text, burnt-orange accent (Sri Raghavendra Swamy Matha portal style).
+   Every colour, font and spacing value lives here only: change a value once and both sites follow. */
 :root {
-  --bg: #fbf6ea; --surface: #fffdf8; --text: #2b1d16; --muted: #6a5646; --border: #e3d5b8;
-  --maroon: #6b1d1d; --maroon-dark: #521212; --saffron: #e8870e; --focus: #a34f00; --on-dark: #fbf1dc;
-  --danger: #9b1c1c; --ok: #1d6b35;
-  --on-saffron: #2b1400; /* text on saffron: white would fail contrast, so saffron buttons use this dark brown */
-  --font-serif: Georgia, "Times New Roman", serif;
-  --font-sans: system-ui, "Segoe UI", sans-serif;
+  color-scheme: dark; /* native date pickers, scrollbars and select popups render dark */
+  --bg: #3A2417;                          /* page background (lighter warm brown) */
+  --bg-gradient: linear-gradient(180deg, #4A2E1E 0%, #3A2417 45%, #2E1B11 100%);
+  --surface: rgba(90, 58, 40, 0.70);      /* cards, panels, modals (lighter than the page) */
+  --border: rgba(255, 220, 170, 0.22);    /* card and input borders */
+  --text: #F8ECD2;                        /* primary text, headings */
+  --text-muted: #D8C3A3;                  /* labels, hints, captions */
+  --accent: #B84A24;                      /* primary buttons (CTA) */
+  --accent-hover: #D2602F;                /* button hover/focus */
+  --gold: #D9AC62;                        /* highlights, icons, active states */
+  --success: #7DB585;                     /* success messages */
+  --error: #D2604A;                       /* error messages */
+
+  /* Derived from the palette above (needed for contrast, hover tints and overlays) */
+  --on-accent: #FFF4E0;                   /* cream label on --accent: 4.7:1 (the plain --text cream is 4.2:1) */
+  --on-accent-hover: #221008;          /* dark label on --accent-hover (>=4.5:1); cream would only reach 3.5:1 */
+  --field: rgba(255, 235, 200, 0.08);     /* inputs, selects, chips, summary boxes */
+  --card-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  --glow: radial-gradient(circle at 50% 0%, rgba(217, 172, 98, 0.12), transparent 60%); /* warm glow behind the content */
+  --tint: rgba(255, 220, 170, 0.09);      /* hover background on transparent controls */
+  --focus: var(--gold);
+  --error-text: color-mix(in srgb, var(--error) 65%, var(--text)); /* --error alone is only 3.5:1 on cards */
+  --overlay: rgba(14, 7, 3, 0.7);         /* modal / drawer backdrop */
+  --hero-bg: #4A2A1A;                     /* banner colour, so wide screens show no seam beside hero-banner.png */
+  --solid: linear-gradient(var(--surface), var(--surface)), var(--bg); /* --surface laid over --bg: for dialogs, toasts, skip link, where nothing should show through */
+
+  /* Booking / room status badges (label text is always shown too) */
+  --st-available: var(--success);
+  --st-booked: #7FA6D6;
+  --st-occupied: #AE92D4;
+  --st-blocked: #A39C93;
+  --st-cleaning: var(--gold);
+  --st-maintenance: #E0924A;
+  --st-out_of_service: var(--error);
+  --st-neutral: var(--text-muted);
+
+  --font-serif: "Cinzel", "Cormorant Garamond", Georgia, serif;
+  --font-sans: "Inter", system-ui, "Segoe UI", sans-serif;
   --s1: .25rem; --s2: .5rem; --s3: .75rem; --s4: 1rem; --s6: 1.5rem; --s8: 2rem; --s12: 3rem; --s16: 4rem; --s24: 6rem;
-  --r: 8px;
+  --r: 12px;        /* buttons, inputs, small controls */
+  --r-card: 24px;   /* cards, panels, tables, dialogs */
+  --blur: blur(12px);
+}
+
+/* Printing: swap to a light warm paper scheme so cream text never prints on a white page */
+@media print {
+  :root {
+    color-scheme: light;
+    --bg: #FBF6EA; --surface: #FBF6EA; --text: #2B1D16; --text-muted: #5A4636; --border: #B9A98A;
+    --gold: #7A4E0F; --error-text: #7B1212; --field: #FBF6EA;
+  }
 }

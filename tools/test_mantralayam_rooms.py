@@ -18,6 +18,17 @@ CI, CO = D(30), D(32)
 N = [0]
 
 
+def real_online_count():
+    s = sqlite3.connect(f"file:{SRC}?mode=ro", uri=True)
+    try:
+        return s.execute("SELECT COUNT(*) FROM bookings WHERE source='online'").fetchone()[0]
+    finally:
+        s.close()
+
+
+REAL_ONLINE = real_online_count()
+
+
 def call(method, path, data=None):
     m.HITS.clear()
     q, body = (data, None) if method == "GET" else (None, data)
@@ -35,6 +46,13 @@ def pick(guests=2):
     assert st == 200 and r["nights"] == 2, r
     p = r["properties"][0]
     return p["property_id"], p["types"][0]
+
+
+def test_health_and_backup():
+    assert call("GET", "/health", {}) == (200, {"ok": True})
+    dest = m.backup(keep=1)
+    assert dest.is_file() and sqlite3.connect(dest).execute("SELECT COUNT(*) FROM bookings").fetchone()[0] >= 0
+    assert len(list(dest.parent.glob("*.db"))) == 1
 
 
 def test_all():
@@ -106,9 +124,7 @@ def test_all():
     # audit trail written, original database untouched
     assert {r[0] for r in db.execute("SELECT action FROM audit_log")} >= {"booking.online_create", "booking.online_cancel"}
     db.close()
-    s = sqlite3.connect(f"file:{SRC}?mode=ro", uri=True)
-    assert s.execute("SELECT COUNT(*) FROM bookings WHERE source='online'").fetchone()[0] == 0
-    s.close()
+    assert real_online_count() == REAL_ONLINE  # tests must never write to the real database
 
 
 def _free(pid, t):
@@ -117,6 +133,7 @@ def _free(pid, t):
 
 if __name__ == "__main__":
     try:
+        test_health_and_backup()
         test_all()
         print("ok")
     finally:

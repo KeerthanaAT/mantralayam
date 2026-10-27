@@ -8,66 +8,88 @@
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/shared.css">
 <style>
-  .wrap { max-width: 64rem; margin: 0 auto; padding: 0 var(--s4); }
-  .hero { background: var(--maroon); color: var(--on-dark); border-bottom: 4px solid var(--saffron); padding: var(--s8) 0 5.5rem; }
-  .hero { padding: 0 0 3.5rem; text-align: center; position: relative; isolation: isolate;
-    background: var(--maroon) url("/images/kolam-tile.png") center / clamp(260px, 30vw, 400px) auto repeat;
-  }
-  .hero::before { content: ""; position: absolute; inset: 0; background: var(--maroon); opacity: .25; z-index: -1; pointer-events: none; } /* light overlay; keep low or the pattern disappears */
-  .hero img { display: inline-block; vertical-align: top; width: auto; height: auto; max-width: 100%; max-height: 22rem; object-fit: contain; }
-  .hero h1 { color: var(--on-dark); font-size: clamp(1.6rem, 6vw, 2.5rem); max-width: 36rem; }
-  .hero p { margin-top: var(--s3); max-width: 38rem; color: #f0dfc2; font-size: 1.05rem; }
-  .eyebrow { text-transform: uppercase; letter-spacing: .1em; font-size: .8rem; color: #f5b45a; margin-bottom: var(--s2); }
+  .wrap { max-width: 70rem; margin: 0 auto; padding: 0 var(--s4); }
+  .hero { background: var(--hero-bg); border-bottom: 4px solid var(--gold); padding: 0; overflow: hidden; position: relative; }
+  .hero::after { content: ""; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 80px rgba(30,18,11,.45); background: linear-gradient(180deg, transparent 80%, rgba(58,36,23,.6)); }
+  .hero img { display: block; width: 100%; max-width: 1600px; height: auto; margin: 0 auto; image-rendering: auto; }
+  @media (max-width: 700px) { .hero img { height: 240px; object-fit: cover; object-position: 50% 50%; } }
+  .hero h1 { color: var(--text); font-size: clamp(1.6rem, 6vw, 2.5rem); max-width: 36rem; }
+  .hero p { margin-top: var(--s3); max-width: 38rem; color: var(--text-muted); font-size: 1.05rem; }
+  .eyebrow { text-transform: uppercase; letter-spacing: .1em; font-size: .8rem; color: var(--gold); margin-bottom: var(--s2); }
   main { padding-bottom: 4rem; }
   #view > h1 { margin-top: var(--s6); }
   main > .wrap > * + * { margin-top: var(--s8); }
-  .search { margin-top: -3.5rem; position: relative; display: grid; gap: var(--s3); grid-template-columns: 1fr; padding: var(--s4); border-top: 4px solid var(--saffron); }
+  .search { margin-top: -3.5rem; position: relative; display: grid; gap: var(--s3); grid-template-columns: 1fr; padding: var(--s6); }
   @media (min-width: 560px) { .search { grid-template-columns: 1fr 1fr; } }
-  @media (min-width: 900px) { .search { grid-template-columns: repeat(3, 1fr); padding: var(--s6); } }
+  @media (min-width: 900px) { .search { grid-template-columns: repeat(3, 1fr); padding: 2rem; } }
   .search .btn, .search .span { grid-column: 1 / -1; }
-  .search .btn { min-height: 3.25rem; font-size: 1.05rem; }
-  .stay { font-weight: 600; color: var(--maroon); }
+  .search .btn { min-height: 3.25rem; font-size: 1.05rem; justify-self: start; width: auto; padding-inline: var(--s8); border-radius: 16px; letter-spacing: .08em; }
+  .stay { font-weight: 600; color: var(--gold); font-size: .9rem; }
   section > h2 { margin-bottom: var(--s3); font-size: 1.4rem; }
   .prop { margin-top: var(--s6); }
   .prop h3 { font-size: 1.25rem; }
-  .types { display: grid; gap: var(--s4); grid-template-columns: 1fr; margin-top: var(--s3); list-style: none; padding: 0; }
-  @media (min-width: 700px) { .types { grid-template-columns: 1fr 1fr; } }
-  .rt { display: flex; flex-direction: column; gap: var(--s3); }
-  .rt h4 { font: 700 1.1rem Georgia, serif; color: var(--maroon); margin: 0; }
+  .bldg { margin-top: var(--s6); }
+  .bldg-h { font: 600 1.25rem var(--font-serif); color: var(--text); margin: 0; padding-bottom: var(--s2); border-bottom: 1px solid var(--border); }
+  .types { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; margin-top: var(--s3); list-style: none; padding: 0; }
+  @media (max-width: 700px) { .types { grid-template-columns: 1fr; } }
+  .types > li { display: flex; }
+  .rt { display: flex; flex-direction: column; gap: 9px; padding: 16px; border-radius: 18px; width: 100%; transition: transform .15s; }
+  @media (hover: hover) { .rt:hover { transform: translateY(-2px); } }
+  .rt .prop-name { font-size: .75rem; color: #D8C3A3; text-transform: uppercase; letter-spacing: .06em; margin: 0; }
+  .rt .small { font-size: .8125rem; margin: 0; }
+  .rt > p.muted { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .rt h4 { font: 600 1.06rem var(--font-serif); font-variant: small-caps; letter-spacing: .04em; color: var(--text); margin: 0; }
   .chips { display: flex; flex-wrap: wrap; gap: var(--s2); list-style: none; margin: 0; padding: 0; }
-  .chips li { font-size: .82rem; padding: .1rem .6rem; border: 1px solid var(--border); border-radius: 999px; background: #fff; }
-  .price { font: 700 1.5rem Georgia, serif; color: var(--text); line-height: 1.1; }
-  .rt .foot { margin-top: auto; display: grid; gap: var(--s3); }
-  .rt .btn { width: 100%; min-height: 3rem; }
-  .photo { aspect-ratio: 16 / 9; background: #f3e6c8; display: grid; place-items: center; border-radius: var(--r) var(--r) 0 0; position: relative; }
-  .photo svg { width: 38%; opacity: .55; }
-  .photo span { position: absolute; bottom: var(--s2); right: var(--s3); font-size: .75rem; color: var(--muted); }
+  .chips li { font-size: .75rem; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--field); color: var(--text); }
+  .price { font: 700 1.3rem var(--font-serif); color: var(--gold); line-height: 1.1; }
+  .rt .foot { margin-top: auto; display: grid; gap: 9px; }
+  .rt .btn { width: 100%; min-height: 40px; padding-block: 4px; font-size: .875rem; }
+  .rt .badge { font-size: .75rem; padding: 0 .55rem; }
   .props { display: grid; gap: var(--s4); grid-template-columns: 1fr; list-style: none; padding: 0; margin: 0; }
   @media (min-width: 700px) { .props { grid-template-columns: 1fr 1fr; } }
   @media (min-width: 1000px) { .props { grid-template-columns: repeat(3, 1fr); } }
-  .pcard { padding: 0; overflow: hidden; display: flex; flex-direction: column; height: 100%; }
-  .pcard .body { padding: var(--s4); display: flex; flex-direction: column; gap: var(--s2); flex: 1; }
-  .pcard .btn { margin-top: auto; }
   .info { display: grid; gap: var(--s4); grid-template-columns: 1fr; }
   @media (min-width: 700px) { .info { grid-template-columns: repeat(3, 1fr); } }
   .info h3 { margin-bottom: var(--s1); }
   dl.facts { display: grid; grid-template-columns: auto 1fr; gap: var(--s2) var(--s4); margin: 0; }
-  dl.facts dt { color: var(--muted); } dl.facts dd { margin: 0; font-weight: 600; text-align: right; }
-  .total dd, .total dt { font-size: 1.15rem; color: var(--maroon); }
-  .conf { border-top: 6px solid var(--ok); display: grid; gap: var(--s4); }
-  .conf .id { font: 700 2.4rem/1.1 Georgia, serif; color: var(--maroon); }
+  dl.facts dt { color: var(--text-muted); } dl.facts dd { margin: 0; font-weight: 600; text-align: right; }
+  .total dd, .total dt { font-size: 1.15rem; color: var(--gold); }
+  .conf { border-top: 6px solid var(--success); display: grid; gap: var(--s4); }
+  .conf .id { font: 700 2.4rem/1.1 var(--font-serif); color: var(--gold); }
   .conf .grid2 { display: grid; gap: var(--s4); grid-template-columns: 1fr; }
   @media (min-width: 700px) { .conf .grid2 { grid-template-columns: 1fr 1fr; } }
-  .conf.cancelled { border-top-color: var(--muted); }
+  .conf.cancelled { border-top-color: var(--text-muted); }
   .actions { display: flex; flex-wrap: wrap; gap: var(--s3); }
   .lookup { display: grid; gap: var(--s3); grid-template-columns: 1fr; max-width: 34rem; }
-  .summary { border: 1px solid var(--border); border-radius: var(--r); padding: var(--s3) var(--s4); background: #fff; }
+  .summary { border: 1px solid var(--border); border-radius: var(--r); padding: var(--s3) var(--s4); background: var(--field); }
   .summary dl { margin: 0; }
-  footer { background: var(--maroon-dark); color: #dccdb0; padding: var(--s6) 0; font-size: .9rem; }
-  footer a { color: #f5d9a8; }
+  footer { background: var(--bg); border-top: 1px solid var(--border); color: var(--text-muted); padding: var(--s6) 0; font-size: .9rem; }
+  footer a { color: var(--gold); }
+
+  /* ---------- Frosted glass (guest site) ---------- */
+  /* warm blobs behind the content so the blur has something to refract */
+  body { background:
+    radial-gradient(ellipse 40rem 30rem at 12% 22%, rgba(184,74,36,.30), transparent 70%),
+    radial-gradient(ellipse 36rem 28rem at 88% 45%, rgba(217,172,98,.22), transparent 70%),
+    radial-gradient(ellipse 44rem 30rem at 25% 85%, rgba(217,172,98,.16), transparent 70%),
+    var(--glow) no-repeat top / 100% 70vh,
+    var(--bg-gradient); background-attachment: fixed; }
+  .card, .summary { background: rgba(255,255,255,.06); -webkit-backdrop-filter: blur(14px) saturate(120%); backdrop-filter: blur(14px) saturate(120%); border: 1px solid rgba(255,235,200,.18); border-radius: 24px; box-shadow: 0 8px 32px rgba(0,0,0,.25); }
+  .summary { border-radius: 14px; background: rgba(255,255,255,.05); box-shadow: none; }
+  .conf { border-top: 1px solid rgba(255,235,200,.18); }
+  @supports not (backdrop-filter: blur(1px)) { .card, .summary { background: rgba(58,36,23,.85); } }
+  input, select, textarea { background: rgba(255,255,255,.05); border: 1px solid rgba(255,235,200,.15); border-radius: 14px; color: #F8ECD2; color-scheme: dark; }
+  input:focus, select:focus, textarea:focus { border-color: #D9AC62; box-shadow: 0 0 0 3px rgba(217,172,98,.25); outline: none; }
+  input[type=date]::-webkit-calendar-picker-indicator { filter: invert(1) opacity(.8); cursor: pointer; }
+  select { -webkit-appearance: none; appearance: none; padding-right: 2.5rem; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none' stroke='%23F8ECD2' stroke-width='2'%3E%3Cpath d='M1 1l5 5 5-5'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 1rem center; }
+  select option { background: #2E1B11; color: #F8ECD2; }
+  label { text-transform: uppercase; font-size: .8125rem; font-weight: 500; letter-spacing: .08em; color: #D8C3A3; }
+  .checks label, .check1 { text-transform: none; letter-spacing: 0; font-size: 1rem; }
+  .hint, .muted, .small { color: #D8C3A3; }
+  .chips li { background: rgba(255,255,255,.06); border: 1px solid rgba(255,235,200,.18); }
   @media print {
     header.top, footer, .hero, .noprint, #toast, .skip { display: none !important; }
-    body { background: #fff; } .card { border: 1px solid #999; }
+    .card { border: 1px solid var(--border); }
   }
 </style>
 </head>
@@ -78,7 +100,7 @@
 <header class="top">
   <div class="bar">
     <a class="brand" href="#/" style="color:inherit;text-decoration:none" aria-label="Mantralayam Rooms, home">
-      <svg viewBox="0 0 40 40" aria-hidden="true" focusable="false"><path d="M20 3l4 5h-8zM13 8h14l3 6H10zM9 14h22l3 7H6zM5 21h30v3H5zM8 24h24v12H8z" fill="#e8870e"/><path d="M17 36v-8h6v8" fill="#521212"/></svg>
+      <img src="/images/logo-transparent.png" alt="" width="56" height="56">
       <div>Mantralayam Rooms<small>Pilgrim accommodation</small></div>
     </a>
     <button class="btn" id="menu-btn" aria-expanded="false" aria-controls="nav">Menu</button>
@@ -93,7 +115,7 @@
 </header>
 
 <div class="hero" id="hero">
-  <img src="/images/hero.png" alt="Sri Raghavendra Swamy of Mantralayam holding a small idol of Lord Krishna">
+  <img src="/images/hero-final-braid-brown-text-both.png" width="1752" height="564" alt="Sri Raghavendra Swamy of Mantralayam holding a small idol of Lord Krishna, on a gold kolam pattern" loading="eager" fetchpriority="high">
 </div>
 
 <main>
@@ -183,7 +205,6 @@ async function api(path, body) {
 }
 const loading = () => h("div", { role: "status", "aria-label": "Loading" }, [1, 2].map(() => h("div", { class: "skeleton", style: "height:9rem" })));
 const note = (cls, ...k) => h("div", { class: "msg " + cls, role: cls === "error" ? "alert" : "status" }, ...k);
-const photo = () => h("div", { class: "photo", "aria-hidden": "true" }, h("svg", { viewBox: "0 0 40 40" }, h("path", { d: "M20 3l4 5h-8zM13 8h14l3 6H10zM9 14h22l3 7H6zM5 21h30v3H5zM8 24h24v12H8z", fill: "#c8872c" })), h("span", null, "Photo coming soon"));
 const dl = (pairs, cls) => h("dl", { class: "facts " + (cls || "") }, pairs.filter(Boolean).flatMap(([k, v, c]) => [h("dt", { class: c }, k), h("dd", { class: c }, v)]));
 
 // ---------- home: search + results + properties ----------
@@ -206,18 +227,12 @@ function homeView(root) {
   };
   f.elements.property_id.addEventListener("change", syncTypes); syncTypes();
   const results = h("section", { "aria-labelledby": "res-h" }, h("h2", { id: "res-h", tabindex: "-1" }, "Available rooms"), h("div", { id: "results", "aria-live": "polite" }));
-  const props = h("section", { "aria-labelledby": "props-h" }, h("h2", { id: "props-h" }, "Our guest houses"),
-    h("ul", { class: "props" }, i.properties.map((p) => h("li", null, h("article", { class: "card pcard" }, photo(), h("div", { class: "body" },
-      h("h3", null, p.name), h("p", null, p.description),
-      h("ul", { class: "chips", "aria-label": "Facilities" }, (p.facilities || "").split(",").map((x) => x.trim()).filter(Boolean).map((x) => h("li", null, x))),
-      p.room_types.length ? h("p", { class: "small" }, h("strong", null, "Rooms: "), p.room_types.join(", ")) : null,
-      h("button", { class: "btn secondary", type: "button", onclick: () => { $("#s_prop").value = p.id; syncTypes(); f.requestSubmit(); } }, "Check availability here"))))) ));
   const st = i.settings;
   const policy = h("section", { "aria-labelledby": "know-h" }, h("h2", { id: "know-h" }, "Good to know"), h("div", { class: "info" },
     h("div", { class: "card" }, h("h3", null, "Check-in and check-out"), h("p", null, `Check-in from ${fmtTime(st.checkin_time)}. Check-out by ${fmtTime(st.checkout_time)}.`)),
     h("div", { class: "card" }, h("h3", null, "Payment"), h("p", null, "Pay at the counter when you arrive. Nothing is charged online.")),
     h("div", { class: "card" }, h("h3", null, "Cancellation"), h("p", null, st.guest_cancel_cutoff_hours ? `Cancel online up to ${st.guest_cancel_cutoff_hours} hours before check-in. After that, please call the property.` : "Cancel online until check-in time."))));
-  root.replaceChildren(f, results, props, policy);
+  root.replaceChildren(f, results, policy);
   const stay = () => {
     const a = f.elements.check_in.value, b = f.elements.check_out.value;
     const n = a && b ? Math.round((new Date(b) - new Date(a)) / 864e5) : 0;
@@ -241,20 +256,30 @@ async function runSearch(q, quiet) {
     S.result = r;
     if (!r.properties.length) out.replaceChildren(note("", h("strong", null, "No rooms are available for these dates and guests."), h("p", { class: "muted" }, "Try different dates, fewer guests, or another property.")));
     else out.replaceChildren(h("p", { class: "muted" }, `${r.nights} night${r.nights > 1 ? "s" : ""} · ${fmtDate(r.check_in)} to ${fmtDate(r.check_out)} · ${r.guests} guest${r.guests > 1 ? "s" : ""}`),
-      ...r.properties.map((p) => h("div", { class: "prop" }, h("h3", null, p.property),
-        h("ul", { class: "types" }, p.types.map((t) => h("li", null, roomCard(p, t, r)))))));
+      ...groupByBuilding(r.properties).map(({ name, cards }) => h("section", { class: "bldg", "aria-label": name },
+        h("h3", { class: "bldg-h" }, name),
+        h("ul", { class: "types" }, cards.map(({ p, t }) => h("li", null, roomCard(p, t, r)))))));
     if (!quiet) { $("#res-h").focus(); $("#res-h").scrollIntoView({ block: "start" }); }
   } catch (e) { out.replaceChildren(note("error", h("strong", null, "We couldn't check availability."), h("p", null, e.message), h("button", { class: "btn secondary small", type: "button", onclick: () => runSearch(q) }, "Try again"))); }
   finally { out.removeAttribute("aria-busy"); }
 }
 
+const byName = (a, b) => a.localeCompare(b, undefined, { sensitivity: "base" });
+function groupByBuilding(props) {
+  const m = new Map();
+  props.forEach((p) => p.types.forEach((t) => { const k = p.property.trim(); if (!m.has(k)) m.set(k, []); m.get(k).push({ p, t }); }));
+  return [...m].map(([name, cards]) => ({ name, cards: cards.sort((x, y) => byName(x.t.type, y.t.type)) })).sort((x, y) => byName(x.name, y.name));
+}
+
 function roomCard(p, t, r) {
+  const isAC = /^ac\b/i.test(t.type.trim());
+  const chips = t.amenities.filter((a) => isAC || a.trim().toLowerCase() !== "ac");
   return h("article", { class: "card rt" },
     h("div", { style: "display:flex;justify-content:space-between;gap:.5rem;align-items:start" }, h("h4", null, t.type), h("span", { class: "badge s-available" }, t.few_left ? "Available · few left" : "Available")),
     h("p", { class: "small muted" }, `Sleeps ${t.capacity}${t.description ? " · " + t.description : ""}`),
-    t.amenities.length ? h("ul", { class: "chips", "aria-label": "Amenities" }, t.amenities.map((a) => h("li", null, a))) : null,
+    chips.length ? h("ul", { class: "chips", "aria-label": "Amenities" }, chips.map((a) => h("li", null, a))) : null,
     t.rooms_needed > 1 ? h("p", { class: "small" }, `For ${r.guests} guests you need ${t.rooms_needed} rooms of this type.`) : null,
-    h("div", { class: "foot" }, h("div", null, h("div", { class: "price" }, inr.format(t.tariff), h("span", { class: "small muted", style: "font:400 .85rem system-ui" }, " per room per night")),
+    h("div", { class: "foot" }, h("div", null, h("div", { class: "price" }, inr.format(t.tariff), h("span", { class: "small muted", style: "font:400 .85rem var(--font-sans)" }, " per room per night")),
       h("div", { class: "small muted" }, `${inr.format(t.total_per_room)} for ${t.nights} night${t.nights > 1 ? "s" : ""}`)),
       h("button", { class: "btn", type: "button", "aria-label": `Book ${t.type} at ${p.property}`, onclick: (e) => openBook(p, t, r, e.currentTarget) }, "Book this room")));
 }
@@ -300,7 +325,7 @@ function bookingCard(b, confirmed) {
   const p = b.property, cancelled = b.status === "Cancelled";
   const statusClass = { Confirmed: "booked", "Checked-In": "occupied" }[b.status] || "neutral";
   return h("article", { class: "card conf" + (cancelled ? " cancelled" : ""), "aria-label": "Booking details" },
-    confirmed ? h("div", null, h("p", { class: "eyebrow", style: "color:var(--ok)" }, "Booking confirmed"), h("p", null, "Thank you. Please keep your booking ID and mobile number: you need both to view or cancel this booking.")) : null,
+    confirmed ? h("div", null, h("p", { class: "eyebrow", style: "color:var(--success)" }, "Booking confirmed"), h("p", null, "Thank you. Please keep your booking ID and mobile number: you need both to view or cancel this booking.")) : null,
     h("div", null, h("div", { class: "small muted" }, "Booking ID"), h("div", { class: "id" }, "#" + b.booking_id), h("span", { class: "badge s-" + statusClass }, b.status)),
     h("div", { class: "grid2" },
       h("div", null, h("h3", null, "Your stay"), dl([["Property", p.name], ["Room type", `${b.room_type}${b.rooms > 1 ? " × " + b.rooms : ""}`], ["Guests", b.guests], ["Check-in", `${fmtDate(b.check_in)}, from ${fmtTime(b.check_in_time)}`],

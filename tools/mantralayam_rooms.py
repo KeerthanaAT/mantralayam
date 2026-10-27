@@ -2,6 +2,7 @@
 
 Usage:
   python tools/mantralayam_rooms.py serve [PORT]     # guest site at /, default port 8001
+  python tools/mantralayam_rooms.py backup           # timestamped DB copy in .tmp/backups (keeps 14)
 
 Reads and writes the existing SQLite database (.tmp/mantralayam.db, or MANTRALAYAM_DB).
 It never creates tables or reseeds data. Rules live in dispatch() so tests call it directly;
@@ -27,6 +28,8 @@ CSP = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline
 ID_TYPES = ("Aadhaar", "Voter ID", "Driving Licence", "Passport", "PAN", "Other")
 DEFAULTS = {"guest_booking_enabled": "1", "guest_max_rooms": "3", "guest_advance_days": "90", "guest_max_nights": "15",
             "guest_cancel_cutoff_hours": "24", "checkin_time": "14:00", "checkout_time": "11:00"}
+IMAGES_DIR = ROOT / "web" / "images"
+IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".svg": "image/svg+xml", ".ico": "image/x-icon"}
 BUSY = ("Confirmed", "Checked-In")
 
 
@@ -311,7 +314,28 @@ def cancel(conn, b, ip):
     return booking_view(conn, find_booking(conn, gid, b.get("phone")))
 
 
-ROUTES = {("GET", "/api/public/info"): info, ("GET", "/api/public/search"): search, ("POST", "/api/public/book"): book,
+def health(conn, q, ip):
+    conn.execute("SELECT 1 FROM properties LIMIT 1")
+    return {"ok": True}
+
+
+def backup(keep=14):
+    """Online-safe copy of the database to .tmp/backups/, keeping the newest `keep`. Returns the new path."""
+    out = DB.parent / "backups"
+    out.mkdir(exist_ok=True)
+    dest = out / f"{DB.stem}-{datetime.now():%Y%m%d-%H%M%S}.db"
+    src, dst = sqlite3.connect(DB), sqlite3.connect(dest)
+    try:
+        src.backup(dst)
+    finally:
+        src.close()
+        dst.close()
+    for old in sorted(out.glob(f"{DB.stem}-*.db"))[:-keep]:
+        old.unlink()
+    return dest
+
+
+ROUTES = {("GET", "/health"): health, ("GET", "/api/public/info"): info, ("GET", "/api/public/search"): search, ("POST", "/api/public/book"): book,
           ("POST", "/api/public/booking/lookup"): lookup, ("POST", "/api/public/booking/cancel"): cancel}
 
 
@@ -340,7 +364,7 @@ def dispatch(method, path, query, body, ip):
 
 
 class Handler(BaseHTTPRequestHandler):
-    def send(self, status, data, ctype="application/json"):
+    def send(self, status, data, ctype="application/json", cache=None):
         data = data if isinstance(data, bytes) else json.dumps(data).encode()
         self.send_response(status)
         self.send_header("Content-Type", ctype + "; charset=utf-8")
@@ -350,6 +374,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "same-origin")
         if ctype == "application/json":
             self.send_header("Cache-Control", "no-store")
+        elif cache:
+            self.send_header("Cache-Control", cache)
         self.end_headers()
         self.wfile.write(data)
 
@@ -358,9 +384,12 @@ class Handler(BaseHTTPRequestHandler):
         if url.path in STATIC:
             name, ctype = STATIC[url.path]
             return self.send(200, (ROOT / "web" / name).read_bytes(), ctype)
-        if url.path in ("/images/hero.png", "/images/kolam-tile.png"):
-            f = ROOT / "web" / "images" / url.path.rsplit("/", 1)[1]
-            return self.send(200, f.read_bytes(), "image/png") if f.is_file() else self.send(404, b"", "text/plain")
+        if url.path.startswith("/images/"):
+            f = IMAGES_DIR / url.path.rsplit("/", 1)[1]
+            ctype = IMAGE_TYPES.get(f.suffix.lower())
+            if not ctype or not f.is_file():
+                return self.send(404, b"", "text/plain")
+            return self.send(200, f.read_bytes(), ctype, cache="public, max-age=3600")
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
         self.send(*dispatch("GET", url.path, q, None, self.client_address[0]))
 
@@ -378,6 +407,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main(argv):
+    if argv[:1] == ["backup"]:
+        print(f"Backup written to {backup()}")
+        return 0
     if argv[:1] != ["serve"]:
         print(__doc__, file=sys.stderr)
         return 2

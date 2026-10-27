@@ -19,12 +19,16 @@ Let pilgrims search room availability, book rooms, look up and cancel their own 
 ## How to run
 ```
 python tools/mantralayam_rooms.py serve [PORT]     # http://127.0.0.1:8001
+python tools/run_all.py                            # guest (8001) and staff (8002) together
+python tools/mantralayam_rooms.py backup           # timestamped DB copy in .tmp/backups, newest 14 kept (schedule this daily)
 python tools/test_mantralayam_rooms.py             # prints "ok"; runs on a COPY of the database
 ```
 
 ## API (all JSON)
 | Method and path | Purpose |
 |---|---|
+| GET `/health` | liveness and DB check, `{"ok": true}` (503 if the DB is missing) |
+| GET `/images/<file>` | any png/jpg/webp/svg/ico in `web/images/` (no allowlist to edit; other types and path tricks give 404) |
 | GET `/api/public/info` | properties, room types, settings, today |
 | GET `/api/public/search?check_in&check_out&guests[&property_id&room_type_id]` | free room types grouped by property, with rooms needed for the party |
 | POST `/api/public/book` | creates a booking (1 to 3 rooms of one type); returns the booking view |
@@ -59,3 +63,4 @@ Errors return `{"error": "<message for the guest>"}` with 400, 403 (online booki
 - 2026-10-06: `guest.html` linked only `shared.css`, so all `var(--...)` colors from `tokens.css` were undefined and the page was unstyled. Fixed by linking `tokens.css` first.
 - 2026-10-06: `replaceChildren(array)` stringifies the array (`[object HTMLDivElement]`); spread it instead.
 - Seed data: the "Non-AC Double" rooms list "AC" among their amenities. That is a data issue in `rooms.amenities`, not a code issue.
+- 2026-10-28: images were served from a hard-coded allowlist, so a new banner 404'd until the list was edited. Now any image file in `web/images/` is served. The rooms test used to assert the real DB had zero online bookings; real ones exist, so it now checks the count is unchanged. The `.venv` points to a missing Python 3.14; use Python 3.12 (`py -3.12`).

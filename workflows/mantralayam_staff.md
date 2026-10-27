@@ -62,3 +62,26 @@ The five accounts already in the database (`admin`, `manager`, `frontdesk`, `hou
 - 2026-10-06: `replaceChildren(array)` prints `[object HTMLElement]` and `replaceChildren(null)` prints "null"; spread arrays and filter nulls.
 - 2026-10-06: a `display: grid` page container makes wide tables stretch the whole page on phones; give grid items `min-width: 0` so the table scrolls inside its wrapper.
 - Mobile emulation widens the layout viewport instead of scrolling, so `scrollWidth - innerWidth` reports no overflow; measure element positions instead.
+
+## Menu (hamburger drawer) and pages, added 2026-10-20
+The top nav is replaced by a hamburger button (top-left, 44px+) that opens a left drawer (20rem on desktop, 80% wide on phones). It shows the user's name and role, one icon + label per page, the current page highlighted, and Log out. It closes on overlay click, the X (the burger itself), Esc or picking an item; the page behind cannot scroll; Tab stays inside while open.
+The server decides the menu: `GET /api/meta` returns `pages` (from `PAGES` in `mantralayam_staff.py`), and every route enforces the same roles. Typing a hidden page's URL falls back to the Dashboard.
+
+| Page | Roles | Notes |
+|------|-------|-------|
+| Dashboard | all | the old "Today" view |
+| Bookings | all except housekeeping | adds **Edit** (guest name, phone, guests, remarks) and **Reschedule** (dates and/or room, re-checks availability, never double-books) |
+| Calendar | all except housekeeping | day / week / month, rooms x dates; click a booking to open it, click a free cell to book |
+| Rooms, Room status | all | unchanged |
+| Guests | all except housekeeping | derived from bookings, grouped by the last 10 digits of the phone number; there is no guests table. "Add guest" opens a new booking; "Edit guest" updates name and phone on all of that guest's bookings |
+| Rooms & rates | managers, super admin | add, edit, delete room types (delete refused while rooms use the type) |
+| Reports | managers, super admin | by check-in date; revenue = booking amount excluding cancelled and no-show |
+| Notifications | all | new and cancelled bookings (last 30 days) and rooms needing cleaning; housekeeping sees cleaning only. "Read" marker per user stored in `settings` as `notif_seen_<user id>` |
+| Audit log | managers, super admin | unchanged |
+| Settings | all | own name and password for everyone (password change ends the user's other sessions); business profile (property address, contact, phone, description, facilities) for managers; check-in/out times for super admin only |
+
+Dropped from the original menu request because the data has no such concept: Services (replaced by Rooms & rates) and Staff schedule.
+
+## Lessons learned (menu work)
+- 2026-10-20: `tools/test_mantralayam_rooms.py` fails against today's live database (it expects zero online bookings). `test_mantralayam_staff.py` copies the live DB too, so old blocks on rooms can leak into it; the cleaning-event check now filters to cleaning kinds.
+- 2026-10-20: a `position: sticky` header always forms its own stacking context; to keep the burger visible above the drawer the header itself sits above the drawer (z-index 50 vs 40).

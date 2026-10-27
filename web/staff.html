@@ -16,10 +16,9 @@
 <header class="top" id="chrome" hidden>
   <div class="bar">
     <div class="brand">
-      <svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 3l4 5h-8zM13 8h14l3 6H10zM9 14h22l3 7H6zM5 21h30v3H5zM8 24h24v12H8z" fill="#e8870e"/></svg>
+      <img src="/images/logo-transparent.png" alt="" width="56" height="56">
       <span>Mantralayam Rooms<small>Staff</small></span>
     </div>
-    <button class="btn" id="menu-btn" type="button" aria-expanded="false" aria-controls="nav">Menu</button>
     <nav class="main" id="nav" aria-label="Staff">
       <ul id="navlist"></ul>
     </nav>
@@ -163,13 +162,8 @@ async function route() {
   root.replaceChildren(loading());
   try { await fn(root); } catch (e) { root.replaceChildren(fail(e, route)); }
   const hd = $("h1", root); if (hd) { hd.tabIndex = -1; hd.focus({ preventScroll: true }); }
-  closeMenu();
 }
 window.addEventListener("hashchange", () => { route(); window.scrollTo({ top: 0 }); });
-const mq = matchMedia("(max-width: 960px)");
-function closeMenu() { $("#menu-btn").setAttribute("aria-expanded", "false"); $("#nav").hidden = mq.matches; }
-$("#menu-btn").onclick = () => { const o = $("#menu-btn").getAttribute("aria-expanded") !== "true"; $("#menu-btn").setAttribute("aria-expanded", o); $("#nav").hidden = !o; };
-mq.addEventListener("change", closeMenu);
 $("#signout").onclick = async () => { try { await api("/api/logout", {}); } catch {} S.meta = null; location.hash = "#/"; route(); };
 
 function loginView(root) {
