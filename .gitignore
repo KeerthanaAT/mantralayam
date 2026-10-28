@@ -4,3 +4,4 @@ token.json
 .tmp/
 __pycache__/
 
+backups/

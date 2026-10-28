@@ -220,7 +220,7 @@ def dashboard(conn, c):
         counts[r["status"]] += 1
     return {"today": t, "arrivals": lst("b.status = 'Confirmed' AND b.check_in = ?", t), "overdue": lst("b.status = 'Confirmed' AND b.check_in < ?", t),
             "inhouse": lst("b.status = 'Checked-In' AND b.check_out > ?", t), "due_out": lst("b.status = 'Checked-In' AND b.check_out <= ?", t),
-            "rooms": dict(counts), "total_rooms": len(rooms)}
+            "rooms": dict(counts), "total_rooms": len(rooms)} | ({"backup": g.last_backup()} if c.user["role"] == "super_admin" else {})
 
 
 def rooms_view(conn, c):

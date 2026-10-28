@@ -326,6 +326,29 @@ def test_admin():
     db.close()
 
 
+def test_backup_status():
+    g.BACKUPS = TMP / "backups"
+    db = sqlite3.connect(g.DB)
+    h, salt = s.make_hash(PW)
+    db.execute("UPDATE users SET pw_hash = ?, salt = ?, active = 1", (h, salt)); db.commit()
+    s.FAILS.clear()
+    for u in ("admin", "manager"):
+        assert login(u)[0] == 200
+    assert call("admin", "GET", "/api/dashboard")[1]["backup"] is None  # nothing has run yet
+    g.backup()
+    assert call("admin", "GET", "/api/dashboard")[1]["backup"]["ok"] is True
+    g.DB, real = TMP / "missing.db", g.DB
+    try:
+        g.backup()
+    except g.BackupError:
+        pass
+    finally:
+        g.DB = real
+    assert call("admin", "GET", "/api/dashboard")[1]["backup"]["ok"] is False
+    assert "backup" not in call("manager", "GET", "/api/dashboard")[1], "only super_admin sees backup status"
+    db.close()
+
+
 def test_hold_blocks_walkin():
     db = sqlite3.connect(g.DB)
     h, salt = s.make_hash(PW)
@@ -385,6 +408,7 @@ if __name__ == "__main__":
     try:
         test_all()
         test_admin()
+        test_backup_status()
         test_hold_blocks_walkin()
         test_peak_admin()
         print("ok")

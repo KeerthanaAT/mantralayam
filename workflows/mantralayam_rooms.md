@@ -20,7 +20,7 @@ Let pilgrims search room availability, book rooms, look up and cancel their own 
 ```
 python tools/mantralayam_rooms.py serve [PORT]     # http://127.0.0.1:8001
 python tools/run_all.py                            # guest (8001) and staff (8002) together
-python tools/mantralayam_rooms.py backup           # timestamped DB copy in .tmp/backups, newest 14 kept (schedule this daily)
+python tools/mantralayam_rooms.py backup           # verified DB copy in backups/, newest 14 kept; exit code 1 + message on failure (schedule daily, see below)
 python tools/test_mantralayam_rooms.py             # prints "ok"; runs on a COPY of the database
 ```
 
@@ -70,3 +70,16 @@ Errors return `{"error": "<message for the guest>"}` with 400, 403 (online booki
 - 2026-10-28: images were served from a hard-coded allowlist, so a new banner 404'd until the list was edited. Now any image file in `web/images/` is served. The rooms test used to assert the real DB had zero online bookings; real ones exist, so it now checks the count is unchanged. The `.venv` points to a missing Python 3.14; use Python 3.12 (`py -3.12`).
 - Peak periods (table `peak_periods`: name, start_date, end_date, optional max_nights, max_rooms, note, active). A period's end date is its last night, so a stay touches it when `start_date < check_out` and `end_date >= check_in`. `parse_stay()` tightens `max_nights` and `max_rooms` to the strictest overlapping active period (a period can only tighten the normal settings, never loosen them), so search, hold and book all enforce the same limits; refusals name the period, for example "During Brahmotsavam online bookings can be for at most 2 nights". The search response includes `peak` (the periods for the searched dates, with notes) and `info.peak_periods` lets the form show the note while the guest is still picking dates, in the results and in the confirm dialog. Existing bookings are never changed by a new period. Managed on the staff Admin page (super_admin only), see `workflows/mantralayam_staff.md`.
 - 2026-10-28 lesson: `migrate()` runs once per process per database path. Replacing the database file under a running server (as a UI test harness does) leaves the new copy without the new tables until the server restarts.
+
+## Backup and restore (added 2026-10-28)
+`backup` uses SQLite's online backup API, so it is safe while both servers run. It writes `backups/mantralayam-YYYY-MM-DD-HHMM.db` (folder is gitignored; override with env `MANTRALAYAM_BACKUPS`), runs `PRAGMA integrity_check` on the copy, and only then deletes everything but the newest 14 (`mantralayam-????-??-??-????.db` only; other files are never touched). A failed run deletes its partial copy, rotates nothing, prints `Backup FAILED: <reason>` to stderr and exits 1. Every run appends `time<TAB>OK|FAILED<TAB>detail` to `backups/backup.log`; the staff Dashboard shows the last line as "Last backup: ... OK/FAILED" to super_admin only (nothing real shows until the first run). Two runs in the same minute replace each other.
+
+Schedule it daily at 02:00 (run once in Command Prompt; use the full path of `python.exe`, here Python 3.12):
+```
+schtasks /Create /SC DAILY /ST 02:00 /TN "Mantralayam Backup" /TR "\"C:\Users\keerthana\AppData\Local\Programs\Python\Python312\python.exe\" \"C:\Users\keerthana\Desktop\claude\tools\mantralayam_rooms.py\" backup"
+schtasks /Run /TN "Mantralayam Backup"
+schtasks /Query /TN "Mantralayam Backup" /V /FO LIST
+```
+`/Run` tries it now (then check `backups\backup.log`); in the query output "Last Result: 0" means the last run succeeded. The task runs only while the PC is on and the user is logged in (add `/RU SYSTEM` from an administrator prompt to avoid that). If the PC was off at 02:00 the dashboard line goes stale, so check its date.
+
+Restore: stop both servers (Ctrl+C in the `run_all.py` window); keep the current file (`copy .tmp\mantralayam.db .tmp\mantralayam.before-restore.db`); delete `.tmp\mantralayam.db-wal` and `-shm` if present; copy the chosen `backups\mantralayam-....db` over `.tmp\mantralayam.db`; start the servers. Bookings made after that backup are lost, so tell staff what time the data goes back to. Staff accounts come back as of the backup too.

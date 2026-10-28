@@ -1,6 +1,9 @@
 """Self-check for the guest booking API. Runs against a COPY of the real database.
 Run: python tools/test_mantralayam_rooms.py   (or pytest)
 """
+import contextlib
+import io
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -50,9 +53,41 @@ def pick(guests=2):
 
 def test_health_and_backup():
     assert call("GET", "/health", {}) == (200, {"ok": True})
-    dest = m.backup(keep=1)
-    assert dest.is_file() and sqlite3.connect(dest).execute("SELECT COUNT(*) FROM bookings").fetchone()[0] >= 0
-    assert len(list(dest.parent.glob("*.db"))) == 1
+    m.BACKUPS = TMP / "backups"
+    (m.BACKUPS).mkdir()
+    for d in range(1, 17):  # 16 older backups, plus files that rotation must never touch
+        (m.BACKUPS / f"mantralayam-2026-01-{d:02d}-0300.db").write_bytes(b"old")
+    (m.BACKUPS / "notes.txt").write_text("keep me")
+    dest = m.backup()
+    names = sorted(p.name for p in m.BACKUPS.glob(m.BACKUP_GLOB))
+    assert re.fullmatch(r"mantralayam-\d{4}-\d\d-\d\d-\d{4}\.db", dest.name) and dest.name == names[-1], dest
+    assert len(names) == 14 and names[0] == "mantralayam-2026-01-04-0300.db", names  # exactly the newest 14 remain
+    assert (m.BACKUPS / "notes.txt").exists() and not list(m.BACKUPS.glob("*.part"))
+    c = sqlite3.connect(dest)
+    assert c.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+    assert c.execute("SELECT COUNT(*) FROM bookings").fetchone() == sqlite3.connect(m.DB).execute("SELECT COUNT(*) FROM bookings").fetchone()
+    c.close()
+    last = m.last_backup()
+    assert last["ok"] and last["detail"] == dest.name, last
+
+    # a failure is reported, logged, never rotates, and the command exits non-zero with a message
+    real_db, m.DB = m.DB, TMP / "missing.db"
+    try:
+        try:
+            m.backup()
+            raise AssertionError("backup of a missing database must fail")
+        except m.BackupError as e:
+            assert "not found" in str(e)
+        assert len(list(m.BACKUPS.glob(m.BACKUP_GLOB))) == 14 and m.last_backup()["ok"] is False
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            assert m.main(["backup"]) == 1
+        assert "Backup FAILED" in err.getvalue()
+    finally:
+        m.DB = real_db
+    with contextlib.redirect_stdout(io.StringIO()):
+        assert m.main(["backup"]) == 0 and m.last_backup()["ok"]  # same minute replaces the file, still 14
+    assert len(list(m.BACKUPS.glob(m.BACKUP_GLOB))) == 14
 
 
 def test_all():

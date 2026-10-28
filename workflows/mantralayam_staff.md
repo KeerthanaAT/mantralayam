@@ -96,3 +96,6 @@ Page `Admin` (`#/admin`), routes under `/api/admin/*`, every route role-checked 
 - `room_types.active` did not exist in the original database; `migrate()` in `mantralayam_rooms.py` adds it (default 1) the first time any server connects. `migrate()` also creates `holds` and `peak_periods`.
 - **Peak periods** tab: create, edit, deactivate (audited as `admin.peak_period_create/edit/activate/deactivate`). Fields: name, first and last night, optional most nights and most rooms per online booking (empty means the normal limit, a value above the normal limit changes nothing), note shown to guests. Dates are validated server-side (end not before start, at most 366 days). Overlapping periods are allowed; the strictest limit applies and all notes are shown. super_admin only, like the rest of the Admin page.
 - Lesson 2026-10-28: `can` in `/api/meta` now has an `admin` key; tests that compare the whole dict must include it.
+
+## Backup status on the Dashboard (added 2026-10-28)
+`GET /api/dashboard` includes `backup` (`{ts, ok, detail}` from the newest line of `backups/backup.log`, or `null` before the first run) for super_admin only; other roles do not get the key. The Dashboard shows "Last backup: <date time> OK", or in red "FAILED (<reason>)". Scheduling and restore steps are in `workflows/mantralayam_rooms.md`.

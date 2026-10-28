@@ -226,17 +226,19 @@ async function act(b, action, done, body) {
 }
 
 // ---------- views ----------
+const backupLine = (b) => h("p", { class: "small " + (b && !b.ok ? "msg error" : "muted"), role: b && !b.ok ? "alert" : null },
+  b ? ["Last backup: ", fmtWhen(b.ts), " ", h("strong", null, b.ok ? "OK" : "FAILED"), b.ok ? null : " (" + b.detail + ")"] : "Last backup: none yet. Run the backup command (see workflows/mantralayam_staff.md).");
 async function todayView(root) {
   const load = async () => {
     const d = await api("/api/dashboard?" + qs({ property_id: S.prop }));
     const card = (n, l, warn) => h("li", { class: warn && n ? "warn" : "" }, h("strong", null, n), h("span", null, l));
-    out.replaceChildren(
+    out.replaceChildren(...["backup" in d ? backupLine(d.backup) : null,
       h("ul", { class: "counts", "aria-label": "Today at a glance" }, card(d.arrivals.length, "Arrivals today"), card(d.overdue.length, "Late arrivals to resolve", true),
         card(d.inhouse.length + d.due_out.length, "Guests in house"), card(d.due_out.length, "Due out", true), card(`${d.rooms.available || 0} of ${d.total_rooms}`, "Rooms available now")),
       ...[d.overdue.length ? bookingTable(d.overdue, "Late arrivals (check-in date has passed)", "") : null,
       bookingTable(d.arrivals, "Arrivals today", "No arrivals expected today."),
       bookingTable(d.due_out, "Due out today or overdue", "No guests are due out."),
-      bookingTable(d.inhouse, "In house", "No guests are checked in.")].filter(Boolean));
+      bookingTable(d.inhouse, "In house", "No guests are checked in.")].filter(Boolean)].filter(Boolean));
   };
   const out = h("div", { style: "display:grid;gap:1.5rem" }, loading());
   root.replaceChildren(h("div", { class: "head" }, h("h1", null, "Today · " + fmtDate(S.meta.today)),

@@ -2,7 +2,7 @@
 
 Usage:
   python tools/mantralayam_rooms.py serve [PORT]     # guest site at /, default port 8001
-  python tools/mantralayam_rooms.py backup           # timestamped DB copy in .tmp/backups (keeps 14)
+  python tools/mantralayam_rooms.py backup           # verified DB copy in backups/ (keeps 14); exit code 1 on failure
 
 Reads and writes the existing SQLite database (.tmp/mantralayam.db, or MANTRALAYAM_DB).
 It never reseeds data; migrate() only adds missing columns or tables. Rules live in dispatch() so tests call it directly;
@@ -33,6 +33,9 @@ DEFAULTS = {"guest_booking_enabled": "1", "guest_max_rooms": "3", "guest_advance
 IMAGES_DIR = ROOT / "web" / "images"
 IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".svg": "image/svg+xml", ".ico": "image/x-icon"}
 BUSY = ("Confirmed", "Checked-In")
+BACKUPS = Path(os.environ.get("MANTRALAYAM_BACKUPS") or ROOT / "backups")
+BACKUP_KEEP = 14
+BACKUP_GLOB = "mantralayam-????-??-??-????.db"
 
 
 class UserError(Exception):
@@ -438,19 +441,60 @@ def health(conn, q, ip):
     return {"ok": True}
 
 
-def backup(keep=14):
-    """Online-safe copy of the database to .tmp/backups/, keeping the newest `keep`. Returns the new path."""
-    out = DB.parent / "backups"
-    out.mkdir(exist_ok=True)
-    dest = out / f"{DB.stem}-{datetime.now():%Y%m%d-%H%M%S}.db"
-    src, dst = sqlite3.connect(DB), sqlite3.connect(dest)
+class BackupError(Exception):
+    pass
+
+
+def backup_log(ok, detail):
+    with open(BACKUPS / "backup.log", "a", encoding="utf-8") as f:
+        f.write(f"{now_iso()}\t{'OK' if ok else 'FAILED'}\t{' '.join(str(detail).split())}\n")
+
+
+def last_backup():
+    """{'ts', 'ok', 'detail'} of the latest backup run (from backups/backup.log), or None if none has run."""
     try:
-        src.backup(dst)
-    finally:
-        src.close()
-        dst.close()
-    for old in sorted(out.glob(f"{DB.stem}-*.db"))[:-keep]:
-        old.unlink()
+        line = [ln for ln in (BACKUPS / "backup.log").read_text(encoding="utf-8").splitlines() if ln.strip()][-1]
+        ts, status, detail = (line.split("\t") + ["", ""])[:3]
+        return {"ts": ts, "ok": status == "OK", "detail": detail}
+    except (OSError, IndexError):
+        return None
+
+
+def backup(keep=BACKUP_KEEP):
+    """Consistent copy of the database (SQLite online backup API, safe while the servers run) to backups/mantralayam-YYYY-MM-DD-HHMM.db.
+    The copy must pass PRAGMA integrity_check before it replaces anything; only then are all but the newest `keep` deleted.
+    Raises BackupError on any failure (and logs it). Returns the new path."""
+    dest = BACKUPS / f"mantralayam-{datetime.now():%Y-%m-%d-%H%M}.db"
+    part = dest.with_name(dest.name + ".part")
+    try:
+        BACKUPS.mkdir(parents=True, exist_ok=True)
+        if not DB.exists():
+            raise BackupError(f"database not found: {DB}")
+        src, dst = sqlite3.connect(DB, timeout=30), sqlite3.connect(part)
+        try:
+            src.backup(dst)
+        finally:
+            src.close()
+            dst.close()
+        chk = sqlite3.connect(part)
+        try:
+            result = [r[0] for r in chk.execute("PRAGMA integrity_check")]
+        finally:
+            chk.close()
+        if result != ["ok"]:
+            raise BackupError("integrity_check failed on the copy: " + "; ".join(result[:3]))
+        os.replace(part, dest)  # same-minute reruns replace the earlier copy
+    except (OSError, sqlite3.Error, BackupError) as e:
+        part.unlink(missing_ok=True)
+        msg = str(e) or type(e).__name__
+        try:
+            backup_log(False, msg)
+        except OSError:
+            pass
+        raise BackupError(msg) from e
+    for old in sorted(BACKUPS.glob(BACKUP_GLOB))[:-keep]:  # names sort by time; non-matching files are never touched
+        old.unlink(missing_ok=True)
+    backup_log(True, dest.name)
     return dest
 
 
@@ -530,7 +574,11 @@ class Handler(BaseHTTPRequestHandler):
 
 def main(argv):
     if argv[:1] == ["backup"]:
-        print(f"Backup written to {backup()}")
+        try:
+            print(f"Backup written to {backup()}")
+        except BackupError as e:
+            print(f"Backup FAILED: {e}", file=sys.stderr)
+            return 1
         return 0
     if argv[:1] != ["serve"]:
         print(__doc__, file=sys.stderr)
