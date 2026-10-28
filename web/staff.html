@@ -52,6 +52,10 @@
       <div><label for="b_idtype" class="req">ID proof type</label><select id="b_idtype" name="id_type" required></select></div>
       <div><label for="b_idno" class="req">ID proof number</label><input id="b_idno" name="id_number" required maxlength="30" autocomplete="off"></div>
     </div>
+    <div class="row">
+      <div><label for="b_arrive">Expected arrival time (optional)</label><input id="b_arrive" name="arrival_time" type="time"></div>
+      <div><label for="b_darshan">Darshan date (optional)</label><input id="b_darshan" name="darshan_date" type="date"></div>
+    </div>
     <div><label for="b_remarks">Remarks (optional)</label><textarea id="b_remarks" name="remarks" maxlength="500"></textarea></div>
     <p id="b_err" class="msg error" role="alert" hidden></p>
     <div class="foot">
@@ -207,7 +211,9 @@ function bookingTable(rows, caption, empty) {
       h("td", null, "#" + b.id, b.source === "online" ? h("div", { class: "small muted" }, "Online") : null),
       h("td", null, h("strong", null, b.guest_name), h("div", { class: "small muted" }, b.phone, " · ID ", b.id_type, " ", b.id_tail)),
       h("td", null, b.room, h("div", { class: "small muted" }, b.property)),
-      h("td", null, fmtDate(b.check_in), " to ", fmtDate(b.check_out), b.cancel_reason ? h("div", { class: "small muted" }, "Reason: " + b.cancel_reason) : null),
+      h("td", null, fmtDate(b.check_in), " to ", fmtDate(b.check_out), b.arrival_time ? h("div", { class: "small" }, "Arrives about " + b.arrival_time) : null,
+        b.darshan_date ? h("div", { class: "small" }, "Darshan " + fmtDate(b.darshan_date)) : null, b.remarks ? h("div", { class: "small muted" }, "Remarks: " + b.remarks) : null,
+        b.cancel_reason ? h("div", { class: "small muted" }, "Reason: " + b.cancel_reason) : null),
       h("td", null, b.guests),
       h("td", null, badge(STATUS_CLASS[b.status] || "neutral", b.status)),
       h("td", { class: "actions" }, can("book") ? bookingActions(b, today) : null))))));
@@ -483,6 +489,7 @@ function openBook(room, pre) {  // pre: a call-back request, pre-fills the dates
   $("#b_idtype").replaceChildren(...S.meta.id_types.map((x) => opt(x, x)));
   const ci = pre ? (pre.check_in < t ? t : pre.check_in) : room ? S.date || t : t;
   $("#b_in").min = t; $("#b_in").value = ci; $("#b_out").value = pre && pre.check_out > ci ? pre.check_out : addDay(ci, 1); $("#b_out").min = addDay(ci, 1);
+  $("#b_darshan").min = t;
   if (pre) { $("#b_name").value = pre.name; $("#b_phone").value = pre.phone; }
   fillRooms($("#b_prop"), $("#b_room"), $("#b_in").value, room && room.id);
   $("#b_alt").hidden = true; $("#b_alt").replaceChildren(); askAvail();

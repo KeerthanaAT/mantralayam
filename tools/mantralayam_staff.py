@@ -156,7 +156,7 @@ def day(v, label):
 
 
 BOOKING_SQL = ("SELECT b.id, b.property_id, b.room_id, b.guest_name, b.phone, b.id_type, b.id_number, b.guests, b.check_in, b.check_out, b.status, "
-               "b.cancel_reason, b.source, b.remarks, b.group_id, b.amount, r.number AS room, p.name AS property "
+               "b.cancel_reason, b.source, b.remarks, b.arrival_time, b.darshan_date, b.group_id, b.amount, r.number AS room, p.name AS property "
                "FROM bookings b JOIN rooms r ON r.id = b.room_id JOIN properties p ON p.id = b.property_id")
 
 
@@ -292,6 +292,7 @@ def create_booking(conn, c):
     guests = g.to_int(b.get("guests"), "Number of guests must be at least 1.", 1, 200)
     if len(remarks) > 500:
         raise UserError("Remarks must be 500 characters or fewer.")
+    arrival, darshan = g.arrival_fields(b)
 
     def work():
         room = conn.execute("SELECT r.*, t.tariff FROM rooms r JOIN room_types t ON t.id = r.room_type_id WHERE r.id = ? AND r.property_id = ? AND r.active = 1",
@@ -304,9 +305,9 @@ def create_booking(conn, c):
             raise UserError(why_not_free(conn, room, ci.isoformat(), co.isoformat()), 409)
         now = datetime.now().isoformat(timespec="seconds")
         cur = conn.execute("INSERT INTO bookings (property_id, room_id, guest_name, phone, id_type, id_number, guests, check_in, check_out, remarks, status, created_by, "
-                           "created_at, status_at, source, payment_method, payment_status, amount) VALUES (?,?,?,?,?,?,?,?,?,?,'Confirmed',?,?,?,'front_desk','pay_at_counter','due',?)",
+                           "created_at, status_at, source, payment_method, payment_status, amount, arrival_time, darshan_date) VALUES (?,?,?,?,?,?,?,?,?,?,'Confirmed',?,?,?,'front_desk','pay_at_counter','due',?,?,?)",
                            (pid, room["id"], name, phone, b["id_type"], id_no, guests, ci.isoformat(), co.isoformat(), remarks or None, u["id"], now, now,
-                            room["tariff"] * (co - ci).days))
+                            room["tariff"] * (co - ci).days, arrival, darshan))
         audit(conn, u, "booking.create", pid, room["id"], None, f"#{cur.lastrowid}: {name}, {ci} to {co}, {guests} guests")
         return cur.lastrowid
     return row(get_booking(conn, u, g.write(conn, work)))
@@ -468,6 +469,8 @@ def edit_booking(conn, c):
     name, remarks = text(b, "guest_name", "Guest name", 1, 100), text(b, "remarks", "Remarks", 0, 500)
     phone = g.norm_phone(b.get("phone"))
     guests = g.to_int(b.get("guests"), "Number of guests must be at least 1.", 1, 200)
+    arrival, darshan = g.arrival_fields(b) if "arrival_time" in b or "darshan_date" in b else (None, None)
+    touch = "arrival_time" in b or "darshan_date" in b
 
     def work():
         cur = get_booking(conn, c.user, c.args["id"])
@@ -477,6 +480,8 @@ def edit_booking(conn, c):
         if guests > cap:
             raise UserError(f"Room {cur['room']} sleeps at most {cap} guests.")
         conn.execute("UPDATE bookings SET guest_name = ?, phone = ?, guests = ?, remarks = ? WHERE id = ?", (name, phone, guests, remarks or None, cur["id"]))
+        if touch:
+            conn.execute("UPDATE bookings SET arrival_time = ?, darshan_date = ? WHERE id = ?", (arrival, darshan, cur["id"]))
         audit(conn, c.user, "booking.edit", cur["property_id"], cur["room_id"], f"{cur['guest_name']}, {cur['phone']}, {cur['guests']} guests", f"{name}, {phone}, {guests} guests")
     g.write(conn, work)
     return row(get_booking(conn, c.user, c.args["id"]))

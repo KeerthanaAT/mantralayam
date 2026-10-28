@@ -290,6 +290,54 @@ def test_callback():
     db.close()
 
 
+def test_arrival_details():
+    db = sqlite3.connect(m.DB)
+    db.execute("DELETE FROM peak_periods")
+    db.commit()
+    pid, t = pick()
+    book = lambda **kw: call("POST", "/api/public/book", guest(property_id=pid, room_type_id=t["room_type_id"]) | kw)
+    cols = {r[1] for r in db.execute("PRAGMA table_info(bookings)")}
+    assert {"arrival_time", "darshan_date", "remarks"} <= cols and "arrival_notes" not in cols, "arrival time and darshan date are new; the one note field stays remarks"
+
+    # the migration is safe to run again and never rewrites data
+    conn = m.connect()
+    n_book, n_cb = conn.execute("SELECT COUNT(*) FROM bookings").fetchone()[0], conn.execute("SELECT COUNT(*) FROM callback_requests").fetchone()[0]
+    m.write(conn, lambda: m.migrate(conn))
+    m.write(conn, lambda: m.migrate(conn))
+    assert [r[1] for r in conn.execute("PRAGMA table_info(bookings)")].count("arrival_time") == 1
+    assert (conn.execute("SELECT COUNT(*) FROM bookings").fetchone()[0], conn.execute("SELECT COUNT(*) FROM callback_requests").fetchone()[0]) == (n_book, n_cb)
+    conn.close()
+
+    # bad values are rejected and nothing is booked
+    before = db.execute("SELECT COUNT(*) FROM bookings").fetchone()[0]
+    for patch, msg in [(dict(arrival_time="25:00"), "arrival time"), (dict(arrival_time="9:5"), "arrival time"), (dict(arrival_time="noon"), "arrival time"), (dict(arrival_time="14:60"), "arrival time"),
+                       (dict(darshan_date=D(-1)), "past"), (dict(darshan_date="tomorrow"), "valid date"), (dict(darshan_date="2026-02-30"), "valid date")]:
+        st, r = book(**patch)
+        assert st == 400 and msg in r["error"], (patch, r)
+    assert db.execute("SELECT COUNT(*) FROM bookings").fetchone()[0] == before
+
+    # stored, returned on booking and on lookup; the note is a separate, unchanged field; both are optional
+    note = "<script>alert(1)</script> <b>ground floor</b>"
+    st, b = book(arrival_time="06:30", darshan_date=D(31), remarks=note)
+    assert st == 200 and (b["arrival_time"], b["darshan_date"], b["special_requests"]) == ("06:30", D(31), note), b
+    st, v = call("POST", "/api/public/booking/lookup", dict(booking_id=b["booking_id"], phone=b["mobile"]))
+    assert st == 200 and (v["arrival_time"], v["darshan_date"], v["special_requests"]) == ("06:30", D(31), note), v
+    assert db.execute("SELECT arrival_time, darshan_date, remarks FROM bookings WHERE group_id = ?", (b["booking_id"],)).fetchone() == ("06:30", D(31), note)
+    st, b2 = book(darshan_date=D(0))  # today is allowed
+    assert st == 200 and b2["arrival_time"] is None and b2["darshan_date"] == D(0), b2
+    st, b3 = book(arrival_time="", darshan_date="")
+    assert st == 200 and b3["arrival_time"] is None and b3["darshan_date"] is None, b3
+    st, g2 = book(arrival_time="23:59", rooms=2, guests=3)  # a group booking carries them on every room
+    assert st == 200 and [r[0] for r in db.execute("SELECT arrival_time FROM bookings WHERE group_id = ?", (g2["booking_id"],))] == ["23:59", "23:59"]
+
+    # display is by text only: the pages never build HTML from data, so a tag in the note shows as typed
+    web = Path(__file__).resolve().parent.parent / "web"
+    for page in ("guest.html", "staff.html"):
+        src = (web / page).read_text(encoding="utf-8")
+        assert not re.search(r"innerHTML|outerHTML|insertAdjacentHTML|document\.write", src), page
+    db.close()
+
+
 def _free(pid, t):
     return m.free_rooms(m.connect(), m.date.fromisoformat(CI), m.date.fromisoformat(CO), pid, t["room_type_id"])
 
@@ -495,6 +543,7 @@ if __name__ == "__main__":
         test_health_and_backup()
         test_alternatives()
         test_callback()
+        test_arrival_details()
         test_holds_and_limits()
         test_peak_periods()
         test_all()

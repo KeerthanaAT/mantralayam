@@ -64,6 +64,10 @@ def migrate(conn):
     """Idempotent additive schema changes, run once per process and database file. Never drops or rewrites data."""
     if "active" not in {r[1] for r in conn.execute("PRAGMA table_info(room_types)")}:
         conn.execute("ALTER TABLE room_types ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
+    have = {r[1] for r in conn.execute("PRAGMA table_info(bookings)")}
+    for col in ("arrival_time", "darshan_date"):  # optional arrival details, added without touching existing rows
+        if col not in have:
+            conn.execute(f"ALTER TABLE bookings ADD COLUMN {col} TEXT")
     conn.execute("CREATE TABLE IF NOT EXISTS holds (id INTEGER PRIMARY KEY, token TEXT NOT NULL, room_id INTEGER NOT NULL REFERENCES rooms(id), "
                  "check_in TEXT NOT NULL, check_out TEXT NOT NULL, expires_at TEXT NOT NULL, ip TEXT)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_holds_room ON holds(room_id, expires_at)")
@@ -307,6 +311,22 @@ def alternatives(conn, ci, co, guests, property_ids=None, type_id=None, max_room
     return out
 
 
+def arrival_fields(b):
+    """Optional expected arrival time (HH:MM) and darshan date (a real date, today or later), shared by the guest and staff forms. Returns (time or None, ISO date or None)."""
+    t, d = str(b.get("arrival_time") or "").strip(), str(b.get("darshan_date") or "").strip()
+    if t and not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", t):
+        raise UserError("Expected arrival time must look like 14:30.")
+    if d:
+        try:
+            dd = date.fromisoformat(d)
+        except ValueError:
+            raise UserError("Darshan date must be a valid date.")
+        if dd < today():
+            raise UserError("Darshan date cannot be in the past.")
+        d = dd.isoformat()
+    return t or None, d or None
+
+
 def norm_phone(v):
     v = re.sub(r"[\s\-]", "", str(v or ""))
     if not re.fullmatch(r"\+?\d{10,13}", v):
@@ -338,7 +358,7 @@ def booking_view(conn, rows):
     return {"booking_id": b["group_id"] or b["id"], "status": status, "property": dict(prop), "room_type": rt["name"], "rooms": len(rows),
             "guests": sum(r["guests"] for r in rows), "check_in": b["check_in"], "check_out": b["check_out"],
             "check_in_time": s["checkin_time"], "check_out_time": s["checkout_time"], "nights": nights, "guest_name": b["guest_name"],
-            "mobile": b["phone"], "special_requests": b["remarks"], "amount": sum(r["amount"] if r["amount"] is not None else rt["tariff"] * nights for r in rows),
+            "mobile": b["phone"], "special_requests": b["remarks"], "arrival_time": b["arrival_time"], "darshan_date": b["darshan_date"], "amount": sum(r["amount"] if r["amount"] is not None else rt["tariff"] * nights for r in rows),
             "payment": {"method": "Pay at counter"}, "cancel_reason": b["cancel_reason"],
             "cancel_deadline": deadline.isoformat(timespec="minutes"), "can_cancel": status == "Confirmed" and datetime.now() < deadline}
 
@@ -387,6 +407,7 @@ def book(conn, b, ip):
         raise UserError("Please enter a valid email address, or leave it empty.")
     if len(remarks) > 500:
         raise UserError("Special requests must be 500 characters or fewer.")
+    arrival, darshan = arrival_fields(b)
     throttle(("book", phone[-10:]), 5, 600, "Too many booking attempts for this mobile number.")
 
     def work():
@@ -404,8 +425,8 @@ def book(conn, b, ip):
         for sh, r in zip(shares, rooms):
             cur = conn.execute(
                 "INSERT INTO bookings (property_id, room_id, guest_name, phone, id_type, id_number, guests, check_in, check_out, remarks, status, "
-                "created_at, status_at, source, email, payment_method, payment_status, amount) VALUES (?,?,?,?,?,?,?,?,?,?,'Confirmed',?,?,'online',?,'pay_at_counter','due',?)",
-                (pid, r["id"], name, phone, b["id_type"], id_no, sh, ci.isoformat(), co.isoformat(), remarks or None, now, now, email or None, r["tariff"] * nights))
+                "created_at, status_at, source, email, payment_method, payment_status, amount, arrival_time, darshan_date) VALUES (?,?,?,?,?,?,?,?,?,?,'Confirmed',?,?,'online',?,'pay_at_counter','due',?,?,?)",
+                (pid, r["id"], name, phone, b["id_type"], id_no, sh, ci.isoformat(), co.isoformat(), remarks or None, now, now, email or None, r["tariff"] * nights, arrival, darshan))
             ids.append(cur.lastrowid)
         conn.execute(f"UPDATE bookings SET group_id = ? WHERE id IN ({','.join('?' * len(ids))})", (ids[0], *ids))
         if token:

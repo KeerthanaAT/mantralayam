@@ -153,6 +153,10 @@
       <div><label for="b_idtype" class="req">ID proof type</label><select id="b_idtype" name="id_type" required></select></div>
       <div><label for="b_idno" class="req">ID proof number</label><input id="b_idno" name="id_number" required maxlength="30" autocomplete="off"></div>
     </div>
+    <div class="row">
+      <div><label for="b_arrive">Expected arrival time (optional)</label><input id="b_arrive" name="arrival_time" type="time"></div>
+      <div><label for="b_darshan">Darshan date (optional)</label><input id="b_darshan" name="darshan_date" type="date"></div>
+    </div>
     <div><label for="b_req">Special requests (optional)</label><textarea id="b_req" name="remarks" maxlength="500" placeholder="For example: ground floor, elderly guests"></textarea></div>
     <div inert style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden"><label for="b_website">Website (leave this empty)</label><input id="b_website" name="website" tabindex="-1" autocomplete="off"></div>
     <p class="msg"><strong>Pay at counter on arrival.</strong> Nothing is charged online.</p>
@@ -376,7 +380,7 @@ async function openBook(p, t, r, opener) {
   catch (x) { toast(x.message); if (/no longer available/i.test(x.message)) runSearch(S.search, true); return; }
   finally { opener.disabled = false; }
   $("#b_idtype").replaceChildren(...ID_TYPES.map((x) => h("option", { value: x }, x)));
-  $("#b_guests").value = r.guests; $("#b_err").hidden = true;
+  $("#b_guests").value = r.guests; $("#b_err").hidden = true; $("#b_darshan").min = S.info.today;
   $("#b_peak").hidden = !r.peak.length; $("#b_peak").replaceChildren(...peakLines(r.peak));
   updateSummary(); $("#bdlg").showModal();
 }
@@ -386,8 +390,11 @@ function updateSummary() {
   $("#b_hint").textContent = `${n} room${n > 1 ? "s" : ""} of ${t.type} sleep${n > 1 ? "" : "s"} up to ${n * t.capacity} guests in total.`;
   $("#bsum").replaceChildren(...dl([["Property", p.property], ["Room type", t.type], ["Check-in", `${fmtDate(r.check_in)}, from ${fmtTime(st.checkin_time)}`],
     ["Check-out", `${fmtDate(r.check_out)}, by ${fmtTime(st.checkout_time)}`], ["Nights", r.nights], ["Rooms", `${n} × ${inr.format(t.tariff)} per night`],
+    $("#b_arrive").value ? ["Expected arrival", fmtTime($("#b_arrive").value)] : null, $("#b_darshan").value ? ["Darshan date", fmtDate($("#b_darshan").value)] : null,
     ["Total amount", inr.format(n * t.total_per_room), "total"]]).children);
 }
+$("#b_arrive").addEventListener("input", () => bctx && updateSummary());
+$("#b_darshan").addEventListener("input", () => bctx && updateSummary());
 $("#b_rooms").addEventListener("change", async () => {
   updateSummary();
   try { await takeHold(); $("#b_err").hidden = true; bctx.n = +$("#b_rooms").value; }
@@ -419,7 +426,8 @@ function bookingCard(b, confirmed) {
     h("div", null, h("div", { class: "small muted" }, "Booking ID"), h("div", { class: "id" }, "#" + b.booking_id), h("span", { class: "badge s-" + statusClass }, b.status)),
     h("div", { class: "grid2" },
       h("div", null, h("h3", null, "Your stay"), dl([["Property", p.name], ["Room type", `${b.room_type}${b.rooms > 1 ? " × " + b.rooms : ""}`], ["Guests", b.guests], ["Check-in", `${fmtDate(b.check_in)}, from ${fmtTime(b.check_in_time)}`],
-        ["Check-out", `${fmtDate(b.check_out)}, by ${fmtTime(b.check_out_time)}`], ["Nights", b.nights], ["Guest name", b.guest_name], ["Mobile", b.mobile], b.special_requests ? ["Requests", b.special_requests] : null])),
+        ["Check-out", `${fmtDate(b.check_out)}, by ${fmtTime(b.check_out_time)}`], ["Nights", b.nights], ["Guest name", b.guest_name], ["Mobile", b.mobile], b.arrival_time ? ["Expected arrival", fmtTime(b.arrival_time)] : null,
+        b.darshan_date ? ["Darshan date", fmtDate(b.darshan_date)] : null, b.special_requests ? ["Requests", b.special_requests] : null])),
       h("div", null, h("h3", null, "Amount and payment"), dl([["Total amount", inr.format(b.amount), "total"], ["Payment", b.payment.method]]),
         h("h3", { style: "margin-top:1rem" }, "Property contact"), h("p", null, h("strong", null, p.name)),
         h("p", { class: "small" }, `${p.contact_person ? p.contact_person + " · " : ""}`, h("a", { href: "tel:" + p.phone }, p.phone)))),

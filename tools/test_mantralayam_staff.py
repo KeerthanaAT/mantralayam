@@ -2,6 +2,7 @@
 Run: python tools/test_mantralayam_staff.py   (or pytest)
 """
 import hashlib
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -445,6 +446,48 @@ def test_callbacks():
     db.close()
 
 
+def test_arrival_details():
+    db = sqlite3.connect(g.DB)
+    h, salt = s.make_hash(PW)
+    db.execute("UPDATE users SET pw_hash = ?, salt = ?, active = 1", (h, salt)); db.commit()
+    s.FAILS.clear()
+    for u in ("frontdesk", "viewer"):
+        assert login(u)[0] == 200
+    room = free_room("frontdesk")
+    stay = dict(check_in=D(20), check_out=D(21))
+    for patch, msg in [(dict(arrival_time="24:00"), "arrival time"), (dict(arrival_time="7pm"), "arrival time"), (dict(darshan_date=D(-1)), "past"), (dict(darshan_date="soon"), "valid date")]:
+        st, out = call("frontdesk", "POST", "/api/bookings", guest(room, **stay) | patch)
+        assert st == 400 and msg in out["error"], (patch, out)
+    note = "<img src=x onerror=alert(1)> late train"
+    st, b = call("frontdesk", "POST", "/api/bookings", guest(room, **stay, arrival_time="05:45", darshan_date=D(21), remarks=note))
+    assert st == 200 and (b["arrival_time"], b["darshan_date"], b["remarks"]) == ("05:45", D(21), note), b
+
+    # returned on every staff list that shows bookings (bookings page, arrivals on the dashboard)
+    row = next(r for r in call("frontdesk", "GET", "/api/bookings", dict(q=str(b["id"])))[1] if r["id"] == b["id"])
+    assert (row["arrival_time"], row["darshan_date"], row["remarks"]) == ("05:45", D(21), note)
+    assert call("viewer", "GET", "/api/bookings", dict(q=str(b["id"])))[1][0]["arrival_time"] == "05:45"
+    st, today_b = call("frontdesk", "POST", "/api/bookings", guest(free_room("frontdesk", skip=(room["id"],)), arrival_time="09:15", darshan_date=D(0)))
+    assert st == 200
+    arr = next(r for r in call("frontdesk", "GET", "/api/dashboard")[1]["arrivals"] if r["id"] == today_b["id"])
+    assert (arr["arrival_time"], arr["darshan_date"]) == ("09:15", D(0)), arr
+    st, plain = call("frontdesk", "POST", "/api/bookings", guest(free_room("frontdesk", skip=(room["id"], today_b["room_id"])), **stay))
+    assert st == 200 and plain["arrival_time"] is None and plain["darshan_date"] is None and plain["remarks"] is None
+
+    # edit: changes them only when asked, and validates
+    ed = lambda **kw: call("frontdesk", "POST", f"/api/bookings/{b['id']}/edit", dict(guest_name="Walk In", phone="9876543210", guests=1, remarks=note) | kw)
+    assert ed(arrival_time="bad")[0] == 400 and ed(darshan_date=D(-2))[0] == 400
+    out = ed()[1]
+    assert (out["arrival_time"], out["darshan_date"]) == ("05:45", D(21)), "an edit without the new fields leaves them alone"
+    out = ed(arrival_time="07:00", darshan_date="")[1]
+    assert (out["arrival_time"], out["darshan_date"]) == ("07:00", None), out
+    assert db.execute("SELECT arrival_time, darshan_date FROM bookings WHERE id = ?", (b["id"],)).fetchone() == ("07:00", None)
+
+    # text only on screen
+    web = Path(__file__).resolve().parent.parent / "web"
+    assert not re.search(r"innerHTML|outerHTML|insertAdjacentHTML|document\.write", (web / "staff.html").read_text(encoding="utf-8"))
+    db.close()
+
+
 def test_hold_blocks_walkin():
     db = sqlite3.connect(g.DB)
     h, salt = s.make_hash(PW)
@@ -507,6 +550,7 @@ if __name__ == "__main__":
         test_backup_status()
         test_alternatives_scope()
         test_callbacks()
+        test_arrival_details()
         test_hold_blocks_walkin()
         test_peak_admin()
         print("ok")
