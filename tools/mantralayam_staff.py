@@ -435,7 +435,7 @@ def audit_view(conn, c):
 
 # ---------- menu pages, extra screens ----------
 FRONT = DESK | {"viewer"}  # everyone who may see guest details
-PAGES = [("today", "Dashboard", ALL), ("bookings", "Bookings", FRONT), ("calendar", "Calendar", FRONT), ("rooms", "Rooms", ALL),
+PAGES = [("today", "Dashboard", ALL), ("bookings", "Bookings", FRONT), ("callbacks", "Call-backs", FRONT), ("calendar", "Calendar", FRONT), ("rooms", "Rooms", ALL),
          ("status", "Room status", ALL), ("guests", "Guests", FRONT), ("rates", "Rooms & rates", MGR), ("reports", "Reports", MGR),
          ("notifications", "Notifications", ALL), ("audit", "Audit log", MGR), ("admin", "Admin", frozenset({"super_admin"})), ("settings", "Settings", ALL)]
 STATUS_LIVE = ("Confirmed", "Checked-In", "Checked-Out")
@@ -547,6 +547,43 @@ def calendar_view(conn, c):
             cells.append(cell)
         out.append({"id": r["id"], "number": r["number"], "property": r["property"], "property_id": r["property_id"], "type": r["type"], "cells": cells})
     return {"start": start.isoformat(), "days": days, "rooms": out}
+
+
+CALLBACK_SQL = ("SELECT c.id, c.property_id, p.name AS property, c.name, c.phone, c.people, c.check_in, c.check_out, c.note, c.status, c.created_at, "
+                "c.handled_by, u.full_name AS handled_by_name, c.handled_at FROM callback_requests c LEFT JOIN properties p ON p.id = c.property_id "
+                "LEFT JOIN users u ON u.id = c.handled_by")
+CALLBACK_STATUSES = ("new", "contacted", "closed")
+
+
+def callbacks_list(conn, c):
+    """Newest first. A user sees requests for their own properties plus requests with no property (those are for everyone)."""
+    ids, status = scope(c.user, c.q.get("property_id")), c.q.get("status") or None
+    if status and status not in CALLBACK_STATUSES:
+        raise UserError("Please choose a valid status.")
+    sql = CALLBACK_SQL + f" WHERE (c.property_id IN ({marks(ids)})" + (" OR c.property_id IS NULL)" if not c.q.get("property_id") else ")")
+    args = list(ids)
+    if status:
+        sql += " AND c.status = ?"
+        args.append(status)
+    return [dict(r) for r in conn.execute(sql + " ORDER BY c.created_at DESC, c.id DESC LIMIT 300", args)]
+
+
+def callback_status(conn, c):
+    new = c.body.get("status")
+    if new not in ("contacted", "closed"):
+        raise UserError("A request can be marked contacted or closed.")
+
+    def work():
+        r = conn.execute("SELECT * FROM callback_requests WHERE id = ?", (c.args["id"],)).fetchone()
+        if not r or (r["property_id"] is not None and r["property_id"] not in c.user["props"]):
+            raise UserError("Call-back request not found.", 404)
+        if r["status"] == "closed" or r["status"] == new:
+            raise UserError(f"This request is already {r['status']}.", 409)
+        conn.execute("UPDATE callback_requests SET status = ?, handled_by = ?, handled_at = ? WHERE id = ?", (new, c.user["id"], now_iso(), r["id"]))
+        audit(conn, c.user, f"callback.{new}", r["property_id"], None, r["status"], new, f"Call-back #{r['id']}: {r['name']}, {r['phone']}")
+        return r["id"]
+    cid = g.write(conn, work)
+    return dict(conn.execute(CALLBACK_SQL + " WHERE c.id = ?", (cid,)).fetchone())
 
 
 def phone_key(v):
@@ -965,6 +1002,7 @@ ROUTES = [R("POST", r"/api/login", login, None), R("POST", r"/api/logout", logou
           R("POST", r"/api/room_events/(?P<id>\d+)/start_cleaning", lambda conn, c: event_action(conn, c, False), CLEANERS),
           R("GET", r"/api/audit", audit_view, MGR),
           R("POST", r"/api/bookings/(?P<id>\d+)/edit", edit_booking, DESK), R("POST", r"/api/bookings/(?P<id>\d+)/reschedule", reschedule_booking, DESK),
+          R("GET", r"/api/callbacks", callbacks_list, FRONT), R("POST", r"/api/callbacks/(?P<id>\d+)/status", callback_status, DESK),
           R("GET", r"/api/calendar", calendar_view, FRONT), R("GET", r"/api/guests", guests_list, FRONT), R("GET", r"/api/guests/profile", guest_profile, FRONT),
           R("POST", r"/api/guests/edit", guest_edit, DESK), R("GET", r"/api/reports", reports, MGR),
           R("GET", r"/api/notifications", notifications, ALL), R("POST", r"/api/notifications/seen", notifications_seen, ALL),

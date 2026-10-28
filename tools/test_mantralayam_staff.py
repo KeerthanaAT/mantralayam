@@ -398,6 +398,53 @@ def test_alternatives_scope():
     db.close()
 
 
+def test_callbacks():
+    db = sqlite3.connect(g.DB)
+    h, salt = s.make_hash(PW)
+    db.execute("UPDATE users SET pw_hash = ?, salt = ?, active = 1", (h, salt)); db.commit()
+    s.FAILS.clear()
+    for u in ("admin", "manager", "frontdesk", "housekeeping", "viewer"):
+        assert login(u)[0] == 200
+    db.execute("DELETE FROM callback_requests"); db.commit()
+    mk = lambda i, **kw: g.dispatch("POST", "/api/public/callback", None, dict(name=f"Caller {i}", phone=f"98700000{i:02d}", people=30, check_in=D(40), check_out=D(42)) | kw, f"7.7.7.{i}")
+    assert [mk(1, property_id=1)[0], mk(2, property_id=3)[0], mk(3)[0]] == [200, 200, 200]  # property 1, property 3 and no property
+    db.execute("UPDATE callback_requests SET created_at = '2026-01-01T10:00:00' WHERE name = 'Caller 1'"); db.commit()  # make Caller 1 the oldest
+
+    # who sees what: own properties plus unassigned; newest first; read-only for viewers; none for housekeeping
+    names = lambda u, **q: [r["name"] for r in call(u, "GET", "/api/callbacks", q)[1]]
+    assert call("housekeeping", "GET", "/api/callbacks")[0] == 403 and call("housekeeping", "POST", "/api/callbacks/1/status", dict(status="closed"))[0] == 403
+    assert sorted(names("frontdesk")) == ["Caller 1", "Caller 3"], "front desk (properties 1 and 2) never sees property 3 requests"
+    assert names("frontdesk")[-1] == "Caller 1", "newest first"
+    assert sorted(names("manager")) == ["Caller 1", "Caller 3"]
+    assert sorted(names("admin")) == ["Caller 1", "Caller 2", "Caller 3"] and sorted(names("viewer")) == ["Caller 1", "Caller 2", "Caller 3"]
+    assert call("frontdesk", "GET", "/api/callbacks", dict(property_id=3))[0] == 403
+    assert names("admin", property_id=3) == ["Caller 2"] and names("admin", property_id=1) == ["Caller 1"], "a property filter is exact"
+    assert call("frontdesk", "GET", "/api/callbacks", dict(status="bogus"))[0] == 400
+    row = next(r for r in call("frontdesk", "GET", "/api/callbacks")[1] if r["name"] == "Caller 1")
+    assert (row["status"], row["people"], row["phone"], row["handled_by"]) == ("new", 30, "9870000001", None) and row["property"]
+    ids = {r["name"]: r["id"] for r in call("admin", "GET", "/api/callbacks")[1]}
+
+    # status changes: role and property checked on the server, saved, audited
+    st = lambda u, name, status: call(u, "POST", f"/api/callbacks/{ids[name]}/status", dict(status=status))
+    assert st("viewer", "Caller 1", "contacted")[0] == 403, "viewers are read-only"
+    assert st("frontdesk", "Caller 2", "contacted")[0] == 404, "another property request cannot be changed"
+    assert st("manager", "Caller 2", "closed")[0] == 404
+    assert st("frontdesk", "Caller 1", "new")[0] == 400 and st("frontdesk", "Caller 1", "bogus")[0] == 400
+    assert call("frontdesk", "POST", "/api/callbacks/99999/status", dict(status="closed"))[0] == 404
+    code, out = st("frontdesk", "Caller 1", "contacted")
+    assert code == 200 and out["status"] == "contacted" and out["handled_at"] and out["handled_by_name"], out
+    assert st("frontdesk", "Caller 1", "contacted")[0] == 409
+    assert st("manager", "Caller 3", "closed")[1]["status"] == "closed", "requests with no property are open to every property user"
+    assert st("frontdesk", "Caller 3", "contacted")[0] == 409, "closed is final"
+    assert names("frontdesk", status="contacted") == ["Caller 1"] and names("frontdesk", status="new") == [] and names("admin", status="new") == ["Caller 2"]
+    saved = db.execute("SELECT status, handled_by, handled_at FROM callback_requests WHERE id = ?", (ids["Caller 1"],)).fetchone()
+    assert saved[0] == "contacted" and saved[1] == db.execute("SELECT id FROM users WHERE username = 'frontdesk'").fetchone()[0] and saved[2]
+    audit = db.execute("SELECT action, username, property_id, old_value, new_value FROM audit_log WHERE action LIKE 'callback.%' AND action != 'callback.request' ORDER BY id").fetchall()
+    assert audit == [("callback.contacted", "frontdesk", 1, "new", "contacted"), ("callback.closed", "manager", None, "new", "closed")], audit
+    assert "callbacks" in [p["key"] for p in call("viewer", "GET", "/api/meta")[1]["pages"]] and "callbacks" not in [p["key"] for p in call("housekeeping", "GET", "/api/meta")[1]["pages"]]
+    db.close()
+
+
 def test_hold_blocks_walkin():
     db = sqlite3.connect(g.DB)
     h, salt = s.make_hash(PW)
@@ -459,6 +506,7 @@ if __name__ == "__main__":
         test_admin()
         test_backup_status()
         test_alternatives_scope()
+        test_callbacks()
         test_hold_blocks_walkin()
         test_peak_admin()
         print("ok")

@@ -70,6 +70,10 @@ def migrate(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_holds_token ON holds(token)")
     conn.execute("CREATE TABLE IF NOT EXISTS peak_periods (id INTEGER PRIMARY KEY, name TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL, "
                  "max_nights INTEGER, max_rooms INTEGER, note TEXT, active INTEGER NOT NULL DEFAULT 1, CHECK (end_date >= start_date))")
+    conn.execute("CREATE TABLE IF NOT EXISTS callback_requests (id INTEGER PRIMARY KEY, property_id INTEGER REFERENCES properties(id), name TEXT NOT NULL, phone TEXT NOT NULL, "
+                 "people INTEGER NOT NULL, check_in TEXT NOT NULL, check_out TEXT NOT NULL, note TEXT, "
+                 "status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'contacted', 'closed')), created_at TEXT NOT NULL, handled_by INTEGER REFERENCES users(id), handled_at TEXT)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_callbacks_status ON callback_requests(status, created_at)")
 
 
 def connect():
@@ -265,10 +269,13 @@ def search(conn, q, ip):
                            "few_left": len(rooms) <= 2, "rooms_needed": need, "can_book": min(len(rooms), s["max_rooms"])})
     for p in props.values():
         p["types"].sort(key=lambda t: t["tariff"])
-    res = {"check_in": ci.isoformat(), "check_out": co.isoformat(), "nights": nights, "guests": guests, "properties": list(props.values()), "peak": s["peak"], "alternatives": []}
-    if not props:  # sold out for this party: offer nearby dates that really are bookable
+    res = {"check_in": ci.isoformat(), "check_out": co.isoformat(), "nights": nights, "guests": guests, "properties": list(props.values()), "peak": s["peak"], "alternatives": [],
+           "callback": None}
+    if not props:  # nothing for this party: offer nearby dates that really are bookable
         pid = opt_int(q.get("property_id"))
         res["alternatives"] = alternatives(conn, ci, co, guests, {pid} if pid else None, opt_int(q.get("room_type_id")))
+        # "group": rooms are free but the party needs more rooms than may be booked online; "soldout": no dates to offer either. Either way staff should call back.
+        res["callback"] = "group" if groups else None if res["alternatives"] else "soldout"
     return res
 
 
@@ -473,6 +480,46 @@ def cancel(conn, b, ip):
     return booking_view(conn, find_booking(conn, gid, b.get("phone")))
 
 
+CALLBACK_MAX_DAYS, CALLBACK_MAX_NIGHTS = 366, 60
+
+
+def callback(conn, b, ip):
+    """A group (or sold-out) guest asks the property to call them back. Same per-IP throttle helper and honeypot as booking."""
+    throttle(("callback-ip", ip), 5, 600, "Too many call-back requests from this device.")
+    if str(b.get("website") or "").strip():  # honeypot: hidden from people, only bots fill it
+        throttle(("callback-ip", ip), 5, 600, "Too many call-back requests from this device.")
+        raise UserError("Some of the values sent are not valid.")
+    name, note = str(b.get("name") or "").strip(), str(b.get("note") or "").strip()
+    if not name or len(name) > 100:
+        raise UserError("Please enter your name.")
+    phone = norm_phone(b.get("phone"))
+    people = to_int(b.get("people"), "Number of people must be between 1 and 500.", 1, 500)
+    try:
+        ci, co = date.fromisoformat(b.get("check_in")), date.fromisoformat(b.get("check_out"))
+    except (TypeError, ValueError):
+        raise UserError("Please choose your preferred check-in and check-out dates.")
+    if ci < today():
+        raise UserError("Check-in date cannot be in the past.")
+    if co <= ci:
+        raise UserError("Check-out must be after check-in.")
+    if ci > today() + timedelta(days=CALLBACK_MAX_DAYS) or (co - ci).days > CALLBACK_MAX_NIGHTS:
+        raise UserError(f"Please choose dates within the next {CALLBACK_MAX_DAYS} days and at most {CALLBACK_MAX_NIGHTS} nights.")
+    if len(note) > 500:
+        raise UserError("The note must be 500 characters or fewer.")
+    pid = opt_int(b.get("property_id"))
+    throttle(("callback", phone[-10:]), 3, 600, "Too many call-back requests for this mobile number.")
+
+    def work():
+        if pid and not conn.execute("SELECT 1 FROM properties WHERE id = ? AND active = 1", (pid,)).fetchone():
+            raise UserError("Please choose a valid property, or leave it empty.")
+        cid = conn.execute("INSERT INTO callback_requests (property_id, name, phone, people, check_in, check_out, note, created_at) VALUES (?,?,?,?,?,?,?,?)",
+                           (pid, name, phone, people, ci.isoformat(), co.isoformat(), note or None, now_iso())).lastrowid
+        audit(conn, "callback.request", pid, None, f"#{cid}: {people} people, {ci} to {co}", f"Call-back request, mobile {phone}")
+        return cid
+    write(conn, work)
+    return {"ok": True}
+
+
 def health(conn, q, ip):
     conn.execute("SELECT 1 FROM properties LIMIT 1")
     return {"ok": True}
@@ -535,7 +582,7 @@ def backup(keep=BACKUP_KEEP):
     return dest
 
 
-ROUTES = {("GET", "/health"): health, ("GET", "/api/public/info"): info, ("GET", "/api/public/search"): search, ("POST", "/api/public/book"): book, ("POST", "/api/public/hold"): hold, ("POST", "/api/public/release"): release,
+ROUTES = {("GET", "/health"): health, ("GET", "/api/public/info"): info, ("GET", "/api/public/search"): search, ("POST", "/api/public/book"): book, ("POST", "/api/public/hold"): hold, ("POST", "/api/public/release"): release, ("POST", "/api/public/callback"): callback,
           ("POST", "/api/public/booking/lookup"): lookup, ("POST", "/api/public/booking/cancel"): cancel}
 
 

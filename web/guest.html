@@ -60,6 +60,9 @@
   @media (min-width: 700px) { .conf .grid2 { grid-template-columns: 1fr 1fr; } }
   .conf.cancelled { border-top-color: var(--text-muted); }
   .actions { display: flex; flex-wrap: wrap; gap: var(--s3); }
+  .cb { display: grid; gap: var(--s3); }
+  .cb .two { display: grid; gap: var(--s3); grid-template-columns: 1fr; }
+  @media (min-width: 560px) { .cb .two { grid-template-columns: 1fr 1fr; } }
   .lookup { display: grid; gap: var(--s3); grid-template-columns: 1fr; max-width: 34rem; }
   .summary { border: 1px solid var(--border); border-radius: var(--r); padding: var(--s3) var(--s4); background: var(--field); }
   .summary dl { margin: 0; }
@@ -264,7 +267,7 @@ async function runSearch(q, quiet) {
   try {
     const r = await api("/api/public/search?" + new URLSearchParams(Object.entries(q).filter(([, v]) => v !== "")));
     S.result = r;
-    if (!r.properties.length) out.replaceChildren(note("", h("strong", null, "No rooms are available for these dates and guests."), h("p", { class: "muted" }, "Try different dates, fewer guests, or another property."), altButtons(r.alternatives || [])));
+    if (!r.properties.length) out.replaceChildren(note("", h("strong", null, "No rooms are available for these dates and guests."), h("p", { class: "muted" }, "Try different dates, fewer guests, or another property."), altButtons(r.alternatives || [])), ...(r.callback ? [callbackForm(r)] : []));
     else out.replaceChildren(h("p", { class: "muted" }, `${r.nights} night${r.nights > 1 ? "s" : ""} · ${fmtDate(r.check_in)} to ${fmtDate(r.check_out)} · ${r.guests} guest${r.guests > 1 ? "s" : ""}`),
       ...(r.peak.length ? [note("", ...peakLines(r.peak))] : []),
       ...groupByBuilding(r.properties).map(({ name, cards }) => h("section", { class: "bldg", "aria-label": name },
@@ -284,6 +287,35 @@ function altButtons(alts) {  // nearby dates that are really free: a click fills
       onclick: () => { const f = $("#search"); f.elements.check_out.value = a.check_out; f.elements.check_in.value = a.check_in; f.elements.check_in.dispatchEvent(new Event("change")); f.dispatchEvent(new Event("input")); runSearch(Object.fromEntries(new FormData(f))); } },
       `${a.nights} night${a.nights > 1 ? "s" : ""} free from ${shortDate(a.check_in)}`))));
 }
+// A big group, or nothing free and no dates to offer: ask the property to phone back
+function callbackForm(r) {
+  const err = h("p", { class: "msg error", role: "alert", hidden: true });
+  const field = (id, label, { tag = "input", ...p }, req) => h("div", null, h("label", { for: id, class: req ? "req" : null }, label), h(tag, { id, required: req, ...p }));
+  const f = h("form", { class: "cb", "aria-labelledby": "cb-h" },
+    h("h3", { id: "cb-h" }, "Request a call-back"),
+    h("p", { class: "muted" }, (r.callback === "group" ? "Your group needs more rooms than can be booked online. " : "We have no rooms for these dates. ") + "Leave your details and the property will phone you."),
+    h("div", { class: "two" }, field("cb_name", "Your name", { name: "name", maxlength: 100, autocomplete: "name" }, true),
+      field("cb_phone", "Mobile number", { name: "phone", type: "tel", maxlength: 20, inputmode: "tel", autocomplete: "tel", pattern: "[+]?[0-9 \\-]{10,16}", title: "10 to 13 digits" }, true)),
+    h("div", { class: "two" }, field("cb_people", "Number of people", { name: "people", type: "number", min: 1, max: 500, inputmode: "numeric", value: r.guests }, true),
+      h("div")),
+    h("div", { class: "two" }, field("cb_in", "Preferred check-in", { name: "check_in", type: "date", min: S.info.today, value: r.check_in }, true),
+      field("cb_out", "Preferred check-out", { name: "check_out", type: "date", min: S.info.today, value: r.check_out }, true)),
+    field("cb_note", "Note (optional)", { tag: "textarea", name: "note", maxlength: 500, placeholder: "For example: elderly guests, need ground floor" }, false),
+    h("div", { inert: true, style: "position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden" }, h("label", { for: "cb_website" }, "Website (leave this empty)"), h("input", { id: "cb_website", name: "website", tabindex: "-1", autocomplete: "off" })),
+    err, h("div", null, h("button", { class: "btn", type: "submit" }, "Request a call-back")));
+  f.addEventListener("submit", async (e) => {
+    e.preventDefault(); err.hidden = true;
+    const btn = $("button", f); btn.disabled = true;
+    try {
+      const v = Object.fromEntries(new FormData(f));
+      await api("/api/public/callback", { ...v, property_id: (S.search && S.search.property_id) || "" });
+      const done = h("div", { class: "msg", role: "status", tabindex: "-1" }, h("strong", null, "Thank you. We have your request."), h("p", null, `The property will phone you on ${v.phone}.`));
+      f.replaceWith(done); done.focus();
+    } catch (x) { err.textContent = x.message; err.hidden = false; btn.disabled = false; }
+  });
+  return h("div", { class: "card", style: "padding:var(--s6);margin-top:var(--s4)" }, f);
+}
+
 const byName = (a, b) => a.localeCompare(b, undefined, { sensitivity: "base" });
 function groupByBuilding(props) {
   const m = new Map();

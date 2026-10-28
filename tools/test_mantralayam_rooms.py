@@ -178,6 +178,7 @@ def unblock(db):
 def test_alternatives():
     db = sqlite3.connect(m.DB)
     db.execute("DELETE FROM peak_periods")
+    db.commit()
     search = lambda a, b, **kw: call("GET", "/api/public/search", dict(check_in=D(a), check_out=D(b), guests=2, **kw))
     st, r = search(40, 42)
     assert st == 200 and r["properties"] and r["alternatives"] == [], "rooms free: no alternatives offered"
@@ -230,6 +231,62 @@ def test_alternatives():
     conn = m.connect()
     assert m.alternatives(conn, m.today() + timedelta(days=40), m.today() + timedelta(days=56), 2) == [], "16 nights exceeds guest_max_nights (15)"
     conn.close()
+    db.close()
+
+
+def test_callback():
+    db = sqlite3.connect(m.DB)
+    db.execute("DELETE FROM peak_periods")
+    db.commit()  # an open transaction here would block the server's own writes
+    N0 = db.execute("SELECT COUNT(*) FROM callback_requests").fetchone()[0]
+    good = dict(name="Group Leader", phone="9876500001", people=40, check_in=D(40), check_out=D(43), note="Need ground floor")
+    count = lambda: db.execute("SELECT COUNT(*) FROM callback_requests").fetchone()[0]
+
+    # every field is validated on the server
+    for patch, msg in [(dict(name=""), "name"), (dict(name="x" * 101), "name"), (dict(phone="12"), "10 to 13"), (dict(phone="abcdefghijk"), "10 to 13"),
+                       (dict(people=0), "people"), (dict(people=501), "people"), (dict(people="many"), "people"), (dict(people=None), "people"),
+                       (dict(check_in=D(-1)), "past"), (dict(check_in="soon"), "dates"), (dict(check_in=None), "dates"), (dict(check_out=D(40)), "after check-in"),
+                       (dict(check_out=D(39)), "after check-in"), (dict(check_in=D(400), check_out=D(401)), "within"), (dict(check_out=D(120)), "nights"),
+                       (dict(note="x" * 501), "500"), (dict(property_id=9999), "property"), (dict(property_id="abc"), "property")]:
+        st, r = call("POST", "/api/public/callback", good | patch)
+        assert st == 400 and msg.lower() in r["error"].lower(), (patch, st, r)
+    assert count() == N0, "nothing is stored for invalid input"
+
+    # honeypot: a filled hidden field is refused with the generic message and nothing is stored
+    st, r = call("POST", "/api/public/callback", good | dict(website="http://spam.example"))
+    assert st == 400 and "not valid" in r["error"] and count() == N0, r
+
+    # a valid request is stored (property optional) and audited
+    st, r = call("POST", "/api/public/callback", good)
+    assert st == 200 and r == {"ok": True}, r
+    st, r = call("POST", "/api/public/callback", good | dict(phone="9876500002", property_id=3, note=""))
+    assert st == 200 and count() == N0 + 2
+    row = db.execute("SELECT property_id, name, phone, people, check_in, check_out, note, status, handled_by FROM callback_requests ORDER BY id DESC LIMIT 1 OFFSET 1").fetchone()
+    assert row == (None, "Group Leader", "9876500001", 40, D(40), D(43), "Need ground floor", "new", None), row
+    assert db.execute("SELECT COUNT(*) FROM audit_log WHERE action = 'callback.request'").fetchone()[0] == 2
+
+    # the guest rate limit applies: 5 per 10 minutes per address, then 429 with Retry-After
+    m.HITS.clear()
+    codes = [m.dispatch("POST", "/api/public/callback", None, good | dict(phone=f"98765001{i:02d}"), "5.6.7.8")[0] for i in range(6)]
+    assert codes == [200] * 5 + [429], codes
+    st, r = m.dispatch("POST", "/api/public/callback", None, good | dict(phone="9876500199"), "5.6.7.8")
+    assert st == 429 and r["retry_after"] > 0, r
+    m.HITS.clear()
+    assert [m.dispatch("POST", "/api/public/callback", None, good, "9.9.9.1")[0] for _ in range(4)] == [200, 200, 200, 429], "3 per mobile number"
+
+    # search tells the page when to offer the form
+    m.HITS.clear()
+    search = lambda a, b, g=2: call("GET", "/api/public/search", dict(check_in=D(a), check_out=D(b), guests=g))[1]
+    assert search(40, 42)["callback"] is None
+    assert search(40, 42, 200)["callback"] == "group", "rooms are free but the party needs more than the online room limit"
+    block_rooms(db, 40, 42)
+    r = search(40, 42)
+    assert r["callback"] is None and r["alternatives"], "sold out but other dates are on offer"
+    unblock(db)
+    block_rooms(db, 20, 70)
+    r = search(40, 42)
+    assert r["callback"] == "soldout" and r["alternatives"] == []
+    unblock(db)
     db.close()
 
 
@@ -437,6 +494,7 @@ if __name__ == "__main__":
     try:
         test_health_and_backup()
         test_alternatives()
+        test_callback()
         test_holds_and_limits()
         test_peak_periods()
         test_all()

@@ -132,7 +132,7 @@ function h(tag, props, ...kids) {
   kids.forEach(add);
   return e;
 }
-const S = { meta: null, prop: "", date: "", bdate: "", q: "", status: "" };
+const S = { meta: null, prop: "", date: "", bdate: "", q: "", status: "", cbstatus: "" };
 const qs = (o) => new URLSearchParams(Object.entries(o).filter(([, v]) => v !== "" && v != null)).toString();
 const STATUS_CLASS = { Confirmed: "booked", "Checked-In": "occupied", "Checked-Out": "neutral", Cancelled: "blocked", "No-Show": "maintenance" };
 const ROOM_LABEL = { available: "Available", booked: "Booked", occupied: "Occupied", blocked: "Blocked", cleaning: "Cleaning", maintenance: "Maintenance", out_of_service: "Out of service" };
@@ -153,13 +153,14 @@ const opt = (v, l, sel) => h("option", { value: v, selected: String(v) === Strin
 const can = (k) => S.meta.can[k];
 
 // ---------- chrome, routing ----------
-const VIEWS = { today: ["Today", todayView], rooms: ["Rooms", roomsView], bookings: ["Bookings", bookingsView], status: ["Room status", statusView], audit: ["Audit log", auditView], admin: ["Admin", adminView] };
+const VIEWS = { today: ["Today", todayView], rooms: ["Rooms", roomsView], bookings: ["Bookings", bookingsView], callbacks: ["Call-backs", callbacksView], status: ["Room status", statusView], audit: ["Audit log", auditView], admin: ["Admin", adminView] };
 const GATE = { audit: "audit", admin: "admin" };
+const allowed = (k) => k === "callbacks" ? S.meta.pages.some((p) => p.key === k) : !GATE[k] || can(GATE[k]);  // the server decides who sees Call-backs
 function chrome() {
   $("#chrome").hidden = !S.meta;
   if (!S.meta) return;
   const cur = location.hash.replace(/^#\/?/, "") || "today";
-  $("#navlist").replaceChildren(...Object.entries(VIEWS).filter(([k]) => !GATE[k] || can(GATE[k])).map(([k, [label]]) =>
+  $("#navlist").replaceChildren(...Object.entries(VIEWS).filter(([k]) => allowed(k)).map(([k, [label]]) =>
     h("li", null, h("a", { href: "#/" + (k === "today" ? "" : k), "data-r": k, "aria-current": k === cur ? "page" : null }, label))));
   $("#who").replaceChildren(h("strong", null, S.meta.user.full_name), S.meta.user.role.replace("_", " "));
 }
@@ -171,7 +172,7 @@ async function route() {
   if (!S.meta) { try { S.meta = await api("/api/meta"); } catch { chrome(); return loginView(root); } }
   chrome();
   const name = location.hash.replace(/^#\/?/, "").split("/")[0] || "today";
-  const [label, fn] = VIEWS[name] && (!GATE[name] || can(GATE[name])) ? VIEWS[name] : VIEWS.today;
+  const [label, fn] = VIEWS[name] && allowed(name) ? VIEWS[name] : VIEWS.today;
   document.title = label + " · Mantralayam Staff";
   root.replaceChildren(loading());
   try { await fn(root); } catch (e) { root.replaceChildren(fail(e, route)); }
@@ -282,6 +283,36 @@ async function bookingsView(root) {
     can("book") ? h("button", { class: "btn secondary", type: "button", onclick: () => openBook() }, "New walk-in booking") : null);
   f.addEventListener("submit", (e) => { e.preventDefault(); S.q = $("#f_q").value; S.status = $("#f_st").value; S.bdate = $("#f_bd").value; load().catch((x) => out.replaceChildren(fail(x, load))); });
   root.replaceChildren(h("h1", null, "Bookings"), f, out);
+  await load();
+}
+
+const CB_CLASS = { new: "booked", contacted: "occupied", closed: "neutral" };
+async function callbacksView(root) {
+  const out = h("div", null);
+  const setStatus = async (r, status, done) => {
+    try { await api(`/api/callbacks/${r.id}/status`, { status }); toast(`Call-back from ${r.name}: ${done}`); await load(); } catch (e) { toast(e.message); }
+  };
+  const load = async () => {
+    out.replaceChildren(loading());
+    const rows = await api("/api/callbacks?" + qs({ property_id: S.prop, status: S.cbstatus }));
+    const btn = (r, label, cls, fn) => h("button", { class: "btn small " + cls, type: "button", "aria-label": `${label}: call-back from ${r.name}`, onclick: fn }, label);
+    out.replaceChildren(rows.length ? h("div", { class: "scroll", role: "region", "aria-label": "Call-back requests", tabindex: "0" }, h("table", null, h("caption", null, `Call-back requests (${rows.length})`),
+      h("thead", null, h("tr", null, ["Received", "Who", "People", "Preferred dates", "Property", "Status", "Actions"].map((t) => h("th", { scope: "col" }, t)))),
+      h("tbody", null, rows.map((r) => h("tr", null,
+        h("td", null, fmtWhen(r.created_at)),
+        h("td", null, h("strong", null, r.name), h("div", { class: "small" }, h("a", { href: "tel:" + r.phone }, r.phone)), r.note ? h("div", { class: "small muted" }, "Note: " + r.note) : null),
+        h("td", null, r.people),
+        h("td", null, fmtDate(r.check_in), " to ", fmtDate(r.check_out)),
+        h("td", null, r.property || "Any property"),
+        h("td", null, badge(CB_CLASS[r.status], r.status[0].toUpperCase() + r.status.slice(1)), r.handled_by_name ? h("div", { class: "small muted" }, `${r.handled_by_name}, ${fmtWhen(r.handled_at)}`) : null),
+        h("td", { class: "actions" }, can("book") && r.status !== "closed" ? [
+          r.status === "new" ? btn(r, "Mark contacted", "secondary", () => setStatus(r, "contacted", "marked contacted.")) : null,
+          btn(r, "Close", "secondary", () => setStatus(r, "closed", "closed.")),
+          btn(r, "Book rooms", "", () => openBook(null, r))] : null)))))) : h("p", { class: "empty card" }, "No call-back requests match."));
+  };
+  root.replaceChildren(h("h1", null, "Call-backs"), h("div", { class: "toolbar" }, propSelect(() => load().catch((e) => out.replaceChildren(fail(e, load)))),
+    h("div", null, h("label", { for: "f_cbs" }, "Status"), h("select", { id: "f_cbs", onchange: (e) => { S.cbstatus = e.target.value; load().catch((x) => out.replaceChildren(fail(x, load))); } },
+      opt("", "All", S.cbstatus), opt("new", "New", S.cbstatus), opt("contacted", "Contacted", S.cbstatus), opt("closed", "Closed", S.cbstatus)))), out);
   await load();
 }
 
@@ -445,12 +476,14 @@ const fillRooms = async (propEl, roomEl, date, keep) => {
     roomEl.replaceChildren(...rooms.map((r) => opt(r.id, `Room ${r.number} · ${r.type} (sleeps ${r.capacity}) · ${ROOM_LABEL[r.status]}`, keep)));
   } catch (e) { roomEl.replaceChildren(opt("", "Could not load rooms")); }
 };
-function openBook(room) {
+function openBook(room, pre) {  // pre: a call-back request, pre-fills the dates, name and phone
   const t = S.meta.today, f = $("#bform"), props = S.meta.properties;
   f.reset(); $("#b_err").hidden = true;
-  $("#b_prop").replaceChildren(...props.map((p) => opt(p.id, p.name, room ? room.property_id : S.prop || props[0].id)));
+  $("#b_prop").replaceChildren(...props.map((p) => opt(p.id, p.name, room ? room.property_id : (pre && pre.property_id) || S.prop || props[0].id)));
   $("#b_idtype").replaceChildren(...S.meta.id_types.map((x) => opt(x, x)));
-  $("#b_in").min = t; $("#b_in").value = room ? S.date || t : t; $("#b_out").value = addDay($("#b_in").value, 1); $("#b_out").min = addDay($("#b_in").value, 1);
+  const ci = pre ? (pre.check_in < t ? t : pre.check_in) : room ? S.date || t : t;
+  $("#b_in").min = t; $("#b_in").value = ci; $("#b_out").value = pre && pre.check_out > ci ? pre.check_out : addDay(ci, 1); $("#b_out").min = addDay(ci, 1);
+  if (pre) { $("#b_name").value = pre.name; $("#b_phone").value = pre.phone; }
   fillRooms($("#b_prop"), $("#b_room"), $("#b_in").value, room && room.id);
   $("#b_alt").hidden = true; $("#b_alt").replaceChildren(); askAvail();
   $("#bdlg").showModal();
