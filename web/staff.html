@@ -42,6 +42,7 @@
       <div><label for="b_out" class="req">Check-out</label><input id="b_out" name="check_out" type="date" required></div>
     </div>
     <p class="hint" id="b_hint">Rooms show their status on the check-in date. The server checks the whole stay.</p>
+    <div id="b_alt" aria-live="polite" hidden></div>
     <div><label for="b_name" class="req">Guest name</label><input id="b_name" name="guest_name" required maxlength="100" autocomplete="off"></div>
     <div class="row">
       <div><label for="b_phone" class="req">Mobile number</label><input id="b_phone" name="phone" type="tel" required inputmode="tel" maxlength="20" autocomplete="off"></div>
@@ -451,11 +452,33 @@ function openBook(room) {
   $("#b_idtype").replaceChildren(...S.meta.id_types.map((x) => opt(x, x)));
   $("#b_in").min = t; $("#b_in").value = room ? S.date || t : t; $("#b_out").value = addDay($("#b_in").value, 1); $("#b_out").min = addDay($("#b_in").value, 1);
   fillRooms($("#b_prop"), $("#b_room"), $("#b_in").value, room && room.id);
+  $("#b_alt").hidden = true; $("#b_alt").replaceChildren(); askAvail();
   $("#bdlg").showModal();
 }
 const addDay = (s, n) => { const d = new Date(s + "T00:00:00"); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
-$("#b_prop").addEventListener("change", () => fillRooms($("#b_prop"), $("#b_room"), $("#b_in").value));
-$("#b_in").addEventListener("change", () => { const a = $("#b_in").value; if (!a) return; $("#b_out").min = addDay(a, 1); if ($("#b_out").value <= a) $("#b_out").value = addDay(a, 1); fillRooms($("#b_prop"), $("#b_room"), a, $("#b_room").value); });
+// No room free for the whole stay: offer nearby dates (the server only looks at the user's own properties)
+let availSeq = 0;
+async function checkAvail() {
+  const box = $("#b_alt"), seq = ++availSeq, a = $("#b_in").value, z = $("#b_out").value;
+  box.hidden = true; box.replaceChildren();
+  if (!a || !z || z <= a || a < S.meta.today) return;
+  try {
+    const r = await api("/api/availability?" + qs({ property_id: $("#b_prop").value, check_in: a, check_out: z, guests: $("#b_guests").value || 1 }));
+    if (seq !== availSeq || r.free) return;
+    box.replaceChildren(h("div", { class: "msg" }, h("p", null, "No room for this party is free on these dates."),
+      r.alternatives.length ? h("div", { role: "group", "aria-label": "Nearby dates with a room free" }, h("p", { class: "small" }, "Nearby dates with a room free:"),
+        h("div", { class: "toolbar" }, r.alternatives.map((x) => h("button", { class: "btn small secondary", type: "button", "aria-label": `Use ${x.nights} night${x.nights > 1 ? "s" : ""}, ${fmtDate(x.check_in)} to ${fmtDate(x.check_out)}`,
+          onclick: () => { $("#b_out").value = x.check_out; $("#b_in").value = x.check_in; $("#b_in").dispatchEvent(new Event("change")); $("#b_in").focus(); } },
+          `${x.nights} night${x.nights > 1 ? "s" : ""} free from ${fmtDate(x.check_in)}`)))) : h("p", { class: "small" }, "Nothing is free within 14 days either side.")));
+    box.hidden = false;
+  } catch { /* the server still checks the booking itself */ }
+}
+let availTimer = 0;
+const askAvail = () => { clearTimeout(availTimer); availTimer = setTimeout(checkAvail, 300); };
+$("#b_prop").addEventListener("change", () => { fillRooms($("#b_prop"), $("#b_room"), $("#b_in").value); askAvail(); });
+$("#b_in").addEventListener("change", () => { const a = $("#b_in").value; if (!a) return; $("#b_out").min = addDay(a, 1); if ($("#b_out").value <= a) $("#b_out").value = addDay(a, 1); fillRooms($("#b_prop"), $("#b_room"), a, $("#b_room").value); askAvail(); });
+$("#b_out").addEventListener("change", askAvail);
+$("#b_guests").addEventListener("input", askAvail);
 $("#b_back").onclick = () => $("#bdlg").close();
 $("#bform").addEventListener("submit", async (e) => {
   e.preventDefault(); const btn = $("#b_submit"), err = $("#b_err"); err.hidden = true;

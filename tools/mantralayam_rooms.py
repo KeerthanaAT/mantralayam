@@ -136,6 +136,12 @@ def parse_stay(conn, check_in, check_out):
         co = date.fromisoformat(check_out)
     except (TypeError, ValueError):
         raise UserError("Check-out must be a valid date (YYYY-MM-DD).")
+    check_stay(conn, s, ci, co)
+    return ci, co, (co - ci).days, s
+
+
+def check_stay(conn, s, ci, co):
+    """The date rules for an online stay (past, order, advance window, nights, peak limits). Raises UserError; tightens s for peak periods."""
     last = today() + timedelta(days=s["advance"])
     if ci < today():
         raise UserError("Check-in date cannot be in the past.")
@@ -147,7 +153,6 @@ def parse_stay(conn, check_in, check_out):
     if (co - ci).days > s["max_nights"]:
         during = f"During {s['peak_nights']} online" if s["peak_nights"] else "Online"
         raise UserError(f"{during} bookings can be for at most {s['max_nights']} nights. For a longer stay please call the property.")
-    return ci, co, (co - ci).days, s
 
 
 def peak_periods(conn, ci, co):
@@ -260,7 +265,39 @@ def search(conn, q, ip):
                            "few_left": len(rooms) <= 2, "rooms_needed": need, "can_book": min(len(rooms), s["max_rooms"])})
     for p in props.values():
         p["types"].sort(key=lambda t: t["tariff"])
-    return {"check_in": ci.isoformat(), "check_out": co.isoformat(), "nights": nights, "guests": guests, "properties": list(props.values()), "peak": s["peak"]}
+    res = {"check_in": ci.isoformat(), "check_out": co.isoformat(), "nights": nights, "guests": guests, "properties": list(props.values()), "peak": s["peak"], "alternatives": []}
+    if not props:  # sold out for this party: offer nearby dates that really are bookable
+        pid = opt_int(q.get("property_id"))
+        res["alternatives"] = alternatives(conn, ci, co, guests, {pid} if pid else None, opt_int(q.get("room_type_id")))
+    return res
+
+
+ALT_SPAN, ALT_MAX = 14, 3
+
+
+def alternatives(conn, ci, co, guests, property_ids=None, type_id=None, max_rooms=None, limit=ALT_MAX):
+    """Up to `limit` nearby stays to offer when [ci, co) is sold out: same number of nights, same party, check-in within ALT_SPAN days either side.
+    Reuses free_rooms and the booking rules (check_stay: not past, guest_advance_days, guest_max_nights incl. peak limits), so every result is bookable now.
+    property_ids limits which properties count (staff scope); max_rooms caps rooms for the party (None: the stay's online limit; staff walk-ins pass 1).
+    Nearest first, earlier before later on a tie. ponytail: one free_rooms query per candidate day (at most 28), fine at this size."""
+    nights, base, out = (co - ci).days, settings(conn), []
+    for k in sorted(range(-ALT_SPAN, ALT_SPAN + 1), key=lambda k: (abs(k), k)):
+        if k == 0 or len(out) >= limit:
+            continue
+        a, b = ci + timedelta(days=k), co + timedelta(days=k)
+        s = dict(base)
+        try:
+            check_stay(conn, s, a, b)
+        except UserError:
+            continue
+        free = [r for r in free_rooms(conn, a, b, None, type_id) if property_ids is None or r["property_id"] in property_ids]
+        groups = defaultdict(list)
+        for r in free:
+            groups[(r["property_id"], r["room_type_id"])].append(r["capacity"])
+        cap = s["max_rooms"] if max_rooms is None else min(max_rooms, s["max_rooms"])
+        if any((n := rooms_needed(caps, guests)) is not None and n <= cap for caps in groups.values()):
+            out.append({"check_in": a.isoformat(), "check_out": b.isoformat(), "nights": nights, "days_away": k})
+    return out
 
 
 def norm_phone(v):

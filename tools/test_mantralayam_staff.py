@@ -349,6 +349,55 @@ def test_backup_status():
     db.close()
 
 
+def test_alternatives_scope():
+    db = sqlite3.connect(g.DB)
+    h, salt = s.make_hash(PW)
+    db.execute("UPDATE users SET pw_hash = ?, salt = ?, active = 1", (h, salt)); db.commit()
+    s.FAILS.clear()
+    for u in ("admin", "frontdesk", "housekeeping", "viewer"):
+        assert login(u)[0] == 200
+    q = dict(check_in=D(40), check_out=D(42), guests=2)
+
+    def block(a, b, where):
+        db.execute("INSERT INTO bookings (property_id, room_id, guest_name, phone, id_type, id_number, guests, check_in, check_out, status, created_at, status_at) "
+                   f"SELECT r.property_id, r.id, 'ALT BLOCK', '9000000001', 'Other', 'x', 1, ?, ?, 'Confirmed', ?, ? FROM rooms r WHERE r.active = 1 AND {where}",
+                   (D(a), D(b), g.now_iso(), g.now_iso()))
+        db.commit()
+
+    def unblock():
+        db.execute("DELETE FROM bookings WHERE guest_name = 'ALT BLOCK'"); db.commit()
+
+    assert call("housekeeping", "GET", "/api/availability", q)[0] == 403 and call("viewer", "GET", "/api/availability", q)[0] == 403
+    assert call("frontdesk", "GET", "/api/availability", q | dict(property_id=3))[0] == 403, "another property"
+    out = call("frontdesk", "GET", "/api/availability", q)[1]
+    assert out["free"] > 0 and out["alternatives"] == [], "rooms are free: nothing to suggest"
+    for bad in (dict(check_in=D(-1)), dict(check_out=D(40)), dict(check_in="nope"), dict(guests=0)):
+        assert call("frontdesk", "GET", "/api/availability", q | bad)[0] == 400, bad
+
+    # the front desk's own properties (1, 2) are full for 50 days; properties 3 to 5 are free
+    block(20, 70, "r.property_id IN (1, 2)")
+    assert call("frontdesk", "GET", "/api/availability", q)[1] == {"free": 0, "alternatives": []}, "other properties' rooms must not be offered to this user"
+    assert call("admin", "GET", "/api/availability", q)[1]["free"] > 0, "the super admin sees every property"
+    assert call("admin", "GET", "/api/availability", q | dict(property_id=1))[1] == {"free": 0, "alternatives": []}
+    unblock()
+
+    # a gap in their own properties: the alternatives are bookable there, and nothing outside 1 and 2 counts
+    block(38, 44, "r.property_id IN (1, 2)")
+    block(36, 46, "r.property_id IN (3, 4, 5)")  # the others are not free near the dates either, so any suggestion must come from 1 or 2
+    out = call("frontdesk", "GET", "/api/availability", q)[1]
+    assert out["free"] == 0 and out["alternatives"], out
+    conn = g.connect()
+    for a in out["alternatives"]:
+        free = [r for r in g.free_rooms(conn, g.date.fromisoformat(a["check_in"]), g.date.fromisoformat(a["check_out"])) if r["property_id"] in (1, 2) and r["capacity"] >= 2]
+        assert free and a["nights"] == 2, a
+    a = out["alternatives"][0]
+    st, b = call("frontdesk", "POST", "/api/bookings", guest(free[0], check_in=a["check_in"], check_out=a["check_out"], guests=2))
+    assert st == 200, b  # the suggested dates can really be booked
+    conn.close()
+    unblock()
+    db.close()
+
+
 def test_hold_blocks_walkin():
     db = sqlite3.connect(g.DB)
     h, salt = s.make_hash(PW)
@@ -409,6 +458,7 @@ if __name__ == "__main__":
         test_all()
         test_admin()
         test_backup_status()
+        test_alternatives_scope()
         test_hold_blocks_walkin()
         test_peak_admin()
         print("ok")

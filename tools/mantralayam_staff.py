@@ -258,6 +258,19 @@ def why_not_free(conn, room, ci, co):
     return f"Room {room['number']} is not available."
 
 
+def availability(conn, c):
+    """For the walk-in dialog: how many rooms (sleeping the party) are free for the stay, and nearby alternatives when none are. Own properties only."""
+    ids = scope(c.user, c.q.get("property_id"))
+    ci, co = day(c.q.get("check_in"), "Check-in"), day(c.q.get("check_out"), "Check-out")
+    if ci < g.today():
+        raise UserError("Check-in date cannot be in the past.")
+    if co <= ci:
+        raise UserError("Check-out must be after check-in.")
+    guests = g.to_int(c.q.get("guests", 1), "Number of guests must be at least 1.", 1, 200)
+    free = sum(1 for r in g.free_rooms(conn, ci, co) if r["property_id"] in ids and r["capacity"] >= guests)
+    return {"free": free, "alternatives": [] if free else g.alternatives(conn, ci, co, guests, set(ids), max_rooms=1)}
+
+
 def create_booking(conn, c):
     b, u = c.body, c.user
     pid = scope(u, b.get("property_id"))[0] if b.get("property_id") else None
@@ -947,7 +960,7 @@ def admin_settings(conn, c):
 R = lambda method, pattern, fn, roles: (method, re.compile(pattern + r"\Z"), fn, roles)
 ROUTES = [R("POST", r"/api/login", login, None), R("POST", r"/api/logout", logout, ALL), R("GET", r"/api/meta", meta, ALL),
           R("GET", r"/api/dashboard", dashboard, ALL), R("GET", r"/api/rooms", rooms_view, ALL), R("GET", r"/api/bookings", bookings_list, FRONT),
-          R("POST", r"/api/bookings", create_booking, DESK), R("GET", r"/api/room_events", events_list, ALL), R("POST", r"/api/room_events", create_event, DESK),
+          R("POST", r"/api/bookings", create_booking, DESK), R("GET", r"/api/availability", availability, DESK), R("GET", r"/api/room_events", events_list, ALL), R("POST", r"/api/room_events", create_event, DESK),
           R("POST", r"/api/room_events/(?P<id>\d+)/release", lambda conn, c: event_action(conn, c, True), CLEANERS),
           R("POST", r"/api/room_events/(?P<id>\d+)/start_cleaning", lambda conn, c: event_action(conn, c, False), CLEANERS),
           R("GET", r"/api/audit", audit_view, MGR),

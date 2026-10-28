@@ -264,7 +264,7 @@ async function runSearch(q, quiet) {
   try {
     const r = await api("/api/public/search?" + new URLSearchParams(Object.entries(q).filter(([, v]) => v !== "")));
     S.result = r;
-    if (!r.properties.length) out.replaceChildren(note("", h("strong", null, "No rooms are available for these dates and guests."), h("p", { class: "muted" }, "Try different dates, fewer guests, or another property.")));
+    if (!r.properties.length) out.replaceChildren(note("", h("strong", null, "No rooms are available for these dates and guests."), h("p", { class: "muted" }, "Try different dates, fewer guests, or another property."), altButtons(r.alternatives || [])));
     else out.replaceChildren(h("p", { class: "muted" }, `${r.nights} night${r.nights > 1 ? "s" : ""} · ${fmtDate(r.check_in)} to ${fmtDate(r.check_out)} · ${r.guests} guest${r.guests > 1 ? "s" : ""}`),
       ...(r.peak.length ? [note("", ...peakLines(r.peak))] : []),
       ...groupByBuilding(r.properties).map(({ name, cards }) => h("section", { class: "bldg", "aria-label": name },
@@ -275,6 +275,15 @@ async function runSearch(q, quiet) {
   finally { out.removeAttribute("aria-busy"); }
 }
 
+const shortDate = (s) => new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short" }).format(new Date(s + "T00:00:00"));
+function altButtons(alts) {  // nearby dates that are really free: a click fills the dates and searches again
+  if (!alts.length) return null;
+  return h("div", { role: "group", "aria-label": "Nearby dates with rooms available", style: "margin-top:var(--s3)" },
+    h("p", null, "These nearby dates have rooms for your group:"),
+    h("div", { class: "actions" }, alts.map((a) => h("button", { class: "btn secondary small", type: "button", "aria-label": `Search again: ${a.nights} night${a.nights > 1 ? "s" : ""}, ${fmtDate(a.check_in)} to ${fmtDate(a.check_out)}`,
+      onclick: () => { const f = $("#search"); f.elements.check_out.value = a.check_out; f.elements.check_in.value = a.check_in; f.elements.check_in.dispatchEvent(new Event("change")); f.dispatchEvent(new Event("input")); runSearch(Object.fromEntries(new FormData(f))); } },
+      `${a.nights} night${a.nights > 1 ? "s" : ""} free from ${shortDate(a.check_in)}`))));
+}
 const byName = (a, b) => a.localeCompare(b, undefined, { sensitivity: "base" });
 function groupByBuilding(props) {
   const m = new Map();

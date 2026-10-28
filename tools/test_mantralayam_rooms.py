@@ -162,6 +162,77 @@ def test_all():
     assert real_online_count() == REAL_ONLINE  # tests must never write to the real database
 
 
+def block_rooms(db, a, b, where="1=1"):
+    """Test helper: one Confirmed booking per active room (matching `where`) for [D(a), D(b)). Removed with unblock()."""
+    db.execute("INSERT INTO bookings (property_id, room_id, guest_name, phone, id_type, id_number, guests, check_in, check_out, status, created_at, status_at) "
+               f"SELECT r.property_id, r.id, 'ALT BLOCK', '9000000001', 'Other', 'x', 1, ?, ?, 'Confirmed', ?, ? FROM rooms r WHERE r.active = 1 AND {where}",
+               (D(a), D(b), m.now_iso(), m.now_iso()))
+    db.commit()
+
+
+def unblock(db):
+    db.execute("DELETE FROM bookings WHERE guest_name = 'ALT BLOCK'")
+    db.commit()
+
+
+def test_alternatives():
+    db = sqlite3.connect(m.DB)
+    db.execute("DELETE FROM peak_periods")
+    search = lambda a, b, **kw: call("GET", "/api/public/search", dict(check_in=D(a), check_out=D(b), guests=2, **kw))
+    st, r = search(40, 42)
+    assert st == 200 and r["properties"] and r["alternatives"] == [], "rooms free: no alternatives offered"
+
+    # everything is sold out on exactly D(40)-D(42): the alternatives are the nearest windows that are really free
+    block_rooms(db, 40, 42)
+    st, r = search(40, 42)
+    assert st == 200 and not r["properties"], r
+    alts = r["alternatives"]
+    assert [a["days_away"] for a in alts] == [-2, 2, -3], alts  # nearest first; D(39)-D(41) and D(41)-D(43) still overlap the blocked nights
+    assert all(a["nights"] == 2 for a in alts) and len({a["check_in"] for a in alts}) == 3
+    for a in alts:  # each is genuinely bookable: search finds rooms
+        st, r2 = call("GET", "/api/public/search", dict(check_in=a["check_in"], check_out=a["check_out"], guests=2))
+        assert st == 200 and r2["properties"], a
+    a = alts[0]
+    st, r2 = call("GET", "/api/public/search", dict(check_in=a["check_in"], check_out=a["check_out"], guests=2))
+    pid, t = r2["properties"][0]["property_id"], r2["properties"][0]["types"][0]
+    st, b = call("POST", "/api/public/book", guest(property_id=pid, room_type_id=t["room_type_id"]) | dict(check_in=a["check_in"], check_out=a["check_out"]))
+    assert st == 200 and b["check_in"] == a["check_in"], b  # ...and a real booking goes through
+
+    # the property filter is kept: the alternatives must be free in that property
+    unblock(db)
+    block_rooms(db, 40, 42, "r.property_id = 1")
+    st, r = search(40, 42, property_id=1)
+    conn = m.connect()
+    assert not r["properties"] and r["alternatives"] and all(
+        m.free_rooms(conn, m.date.fromisoformat(a["check_in"]), m.date.fromisoformat(a["check_out"]), 1) for a in r["alternatives"])
+    conn.close()
+    unblock(db)
+
+    # nothing free within 14 days either side: no alternatives at all
+    block_rooms(db, 20, 70)
+    st, r = search(40, 42)
+    assert st == 200 and r["properties"] == [] and r["alternatives"] == [], r
+    unblock(db)
+
+    # the party must fit: 200 guests need more rooms than anyone may book, so no date helps
+    st, r = call("GET", "/api/public/search", dict(check_in=CI, check_out=CO, guests=200))
+    assert st == 200 and r["properties"] == [] and r["alternatives"] == []
+
+    # never in the past, never beyond the advance window, never over the night limit
+    block_rooms(db, 1, 3)
+    st, r = search(1, 3)
+    assert r["alternatives"] and all(D(0) <= a["check_in"] <= D(90) for a in r["alternatives"]), r
+    unblock(db)
+    block_rooms(db, 88, 90)
+    st, r = search(88, 90)
+    assert r["alternatives"] and all(a["check_in"] <= D(90) for a in r["alternatives"]), r
+    unblock(db)
+    conn = m.connect()
+    assert m.alternatives(conn, m.today() + timedelta(days=40), m.today() + timedelta(days=56), 2) == [], "16 nights exceeds guest_max_nights (15)"
+    conn.close()
+    db.close()
+
+
 def _free(pid, t):
     return m.free_rooms(m.connect(), m.date.fromisoformat(CI), m.date.fromisoformat(CO), pid, t["room_type_id"])
 
@@ -365,6 +436,7 @@ def test_peak_periods():
 if __name__ == "__main__":
     try:
         test_health_and_backup()
+        test_alternatives()
         test_holds_and_limits()
         test_peak_periods()
         test_all()
