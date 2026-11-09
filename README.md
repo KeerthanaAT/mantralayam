@@ -2,6 +2,15 @@
 
 Room booking for the Mantralayam guest houses: a guest website and a staff app, both Python standard library only, sharing one SQLite database.
 
+## Getting started
+1. Install Python 3.12 or newer. There is nothing else to install (standard library only).
+2. Clone the repo: `git clone https://github.com/KeerthanaAT/mantralayam` and `cd mantralayam`.
+3. Optional: copy `.env.example` to `.env` and fill in what you need. Without it, everything runs locally with mock SMS, email and payments.
+4. Start both servers: `python tools/run_all.py`.
+5. Open the guest site at http://127.0.0.1:8001 and the staff app at http://127.0.0.1:8002/staff. Press Ctrl+C to stop.
+
+The database is created in `.tmp/mantralayam.db` on first start. In development, SMS codes are printed in the terminal.
+
 ## Run
 ```
 python tools/run_all.py                    # guest site http://127.0.0.1:8001, staff app http://127.0.0.1:8002/staff
