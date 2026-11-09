@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Stay at Mantralayam · Book a Room</title>
 <meta name="description" content="Book a room at pilgrim guest houses, choultries and cottages near Sri Raghavendra Swamy Mutt, Mantralayam.">
+<script nonce="__NONCE__">try { const a = JSON.parse(localStorage.getItem("a11y") || "{}"); if (a.text) document.documentElement.dataset.text = "large"; if (a.contrast) document.documentElement.dataset.contrast = "high"; } catch (e) {}</script>
+<link rel="icon" href="/images/icon-192.png" type="image/png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#2b1a12">
+<link rel="apple-touch-icon" href="/images/icon-192.png">
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/shared.css">
 <style>
@@ -35,6 +40,8 @@
   .types > li { display: flex; }
   .rt { display: flex; flex-direction: column; gap: 9px; padding: 16px; border-radius: 18px; width: 100%; transition: transform .15s; }
   @media (hover: hover) { .rt:hover { transform: translateY(-2px); } }
+  .rtphoto { display: block; width: 100%; aspect-ratio: 8 / 5; object-fit: cover; border-radius: 12px; background: var(--field); }
+  .rtphoto.none { display: grid; place-items: center; font-size: 2.2rem; color: var(--text-muted); }
   .rt .prop-name { font-size: .75rem; color: #D8C3A3; text-transform: uppercase; letter-spacing: .06em; margin: 0; }
   .rt .small { font-size: .8125rem; margin: 0; }
   .rt > p.muted { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -45,6 +52,17 @@
   .rt .foot { margin-top: auto; display: grid; gap: 9px; }
   .rt .btn { width: 100%; min-height: 40px; padding-block: 4px; font-size: .875rem; }
   .rt .badge { font-size: .75rem; padding: 0 .55rem; }
+  .pay { display: grid; gap: var(--s2); }
+  .pay .opt { display: flex; gap: var(--s2); align-items: flex-start; padding: var(--s2) var(--s3); border: 1px solid var(--border); border-radius: var(--r); min-height: 44px; cursor: pointer; text-transform: none; letter-spacing: 0; font-size: 1rem; font-weight: 400; }
+  .pay .opt:has(input:checked) { border-color: var(--gold); background: var(--field); }
+  .pay .opt input { margin-top: .3rem; }
+  .a11y { display: flex; gap: var(--s2); flex-wrap: wrap; }
+  .a11y button[aria-pressed=true] { border-color: var(--gold); background: var(--field); }
+  .nbox { border-left: 4px solid var(--gold); } .nbox.warning { border-left-color: var(--error); } .stars { display: flex; gap: var(--s2); flex-wrap: wrap; border: 0; padding: 0; margin: 0; }
+  .stars label { display: inline-flex; gap: .35rem; align-items: center; min-height: 44px; padding: 0 var(--s3); border: 1px solid var(--border); border-radius: var(--r); text-transform: none; letter-spacing: 0; font-size: 1.05rem; cursor: pointer; }
+  .stars label:has(input:checked) { border-color: var(--gold); background: var(--field); }
+  .secure { display: flex; gap: var(--s2); align-items: flex-start; }
+  .qr { display: block; margin: var(--s2) auto; width: 160px; height: 160px; image-rendering: pixelated; background: #fff; padding: 6px; border-radius: 4px; }
   .props { display: grid; gap: var(--s4); grid-template-columns: 1fr; list-style: none; padding: 0; margin: 0; }
   @media (min-width: 700px) { .props { grid-template-columns: 1fr 1fr; } }
   @media (min-width: 1000px) { .props { grid-template-columns: repeat(3, 1fr); } }
@@ -68,6 +86,23 @@
   .summary dl { margin: 0; }
   footer { background: var(--bg); border-top: 1px solid var(--border); color: var(--text-muted); padding: var(--s6) 0; font-size: .9rem; }
   footer a { color: var(--gold); }
+  .footlinks { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); list-style: none; padding: 0; margin: 0 0 var(--s3); }
+  a.btn { text-decoration: none; display: inline-grid; place-items: center; }
+  .pg { padding: var(--s6); margin-top: var(--s4); }
+  .pg h2 { margin-bottom: var(--s3); }
+  .pg h3 { margin: var(--s4) 0 var(--s2); }
+  .pre { white-space: pre-line; margin: 0 0 var(--s3); }
+  ul.plain { margin: 0 0 var(--s3); padding-left: 1.25rem; }
+  .map { width: 100%; min-height: 20rem; border: 0; border-radius: var(--r); }
+  details.faq { margin-top: var(--s3); padding: var(--s3) var(--s4); }
+  details.faq summary { cursor: pointer; font-weight: 600; }
+  nav.main details { position: relative; }
+  nav.main summary { list-style: none; cursor: pointer; padding: var(--s2) var(--s3); border-radius: var(--r); color: var(--text); white-space: nowrap; }
+  nav.main summary::-webkit-details-marker { display: none; }
+  nav.main summary::after { content: " \25BE"; }
+  nav.main summary:hover { background: var(--tint); }
+  nav.main details > ul { position: absolute; right: 0; top: 100%; min-width: 16rem; flex-direction: column; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r); padding: var(--s2); z-index: 20; }
+  @media (max-width: 960px) { nav.main details > ul { position: static; border: 0; padding: 0 0 0 var(--s4); } }
 
   /* ---------- Frosted glass (guest site) ---------- */
   /* warm blobs behind the content so the blur has something to refract */
@@ -90,104 +125,272 @@
   .checks label, .check1 { text-transform: none; letter-spacing: 0; font-size: 1rem; }
   .hint, .muted, .small { color: #D8C3A3; }
   .chips li { background: rgba(255,255,255,.06); border: 1px solid rgba(255,235,200,.18); }
+
+  /* ---------- Mobile-first pass: 44px tap targets, no sideways scroll, simple forms ---------- */
+  html, body { max-width: 100%; overflow-x: hidden; }
+  .card, .msg, dd, dt, li, p, h1, h2, h3, h4, summary, label { overflow-wrap: anywhere; }
+  .btn, .btn.small, .rt .btn, input:not([type=checkbox]), select, summary, #menu-btn { min-height: 44px; }
+  nav.main a, .footlinks a { display: inline-flex; align-items: center; min-height: 44px; }
+  .footlinks a { padding: 0 var(--s1); }
+  footer p a { display: inline-block; padding: 10px 2px; }
+  summary { display: flex; align-items: center; cursor: pointer; }
+  .search > *, .row > *, .cb .two > * { min-width: 0; }
+  .more { border: 1px solid var(--border); border-radius: var(--r); padding: 0 var(--s3); }
+  .more > summary { font-weight: 600; color: var(--gold); }
+  .morebody { display: grid; gap: var(--s3); padding: var(--s2) 0 var(--s3); }
+  .pernight { font: 400 .85rem var(--font-sans); }
+  @media (max-width: 600px) {
+    .wrap { padding: 0 var(--s3); }
+    .bar { flex-wrap: wrap; }
+    .brand { min-width: 0; white-space: normal; font-size: .95rem; }
+    .search { padding: var(--s4); }
+    .search .btn, .cb .btn, .lookup .btn { width: 100%; justify-self: stretch; padding-inline: var(--s4); }
+    .actions .btn { flex: 1 1 100%; }
+    dialog { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border-radius: 0; border-width: 0; }
+    dialog form { padding: var(--s4); }
+    dialog .foot .btn { flex: 1 1 100%; }
+    dialog .foot { flex-direction: column-reverse; }
+    dl.facts dd { text-align: right; }
+    .conf .id { font-size: 2rem; }
+  }
+  /* ---------- Availability calendar, price breakdown, OTP, account ---------- */
+  .cal-nav { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); }
+  .cal-nav h3 { margin: 0; text-align: center; flex: 1; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+  .cal-grid .wd { text-align: center; font-size: .7rem; color: var(--text-muted); padding: 4px 0; }
+  .cal-day { min-height: 48px; padding: 2px; border-radius: 10px; border: 1.5px solid var(--c, var(--border)); background: color-mix(in srgb, var(--c, transparent) 18%, transparent); color: var(--text); display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.15; cursor: pointer; font: inherit; }
+  .cal-day b { font-size: .95rem; }
+  .cal-day small { font-size: .6rem; color: var(--text-muted); white-space: nowrap; }
+  .cal-day.available { --c: var(--success); }
+  .cal-day.few { --c: #E0924A; }
+  .cal-day.soldout { --c: var(--error); cursor: not-allowed; }
+  .cal-day.soldout b { text-decoration: line-through; }
+  .cal-day.closed { --c: var(--st-blocked); opacity: .5; cursor: not-allowed; }
+  .cal-day.peak { outline: 2px dotted var(--gold); outline-offset: -4px; }
+  .cal-day[aria-pressed="true"] { background: var(--gold); color: #221008; }
+  .cal-day[aria-pressed="true"] small { color: #221008; }
+  .cal-legend { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); list-style: none; padding: 0; margin: 0; font-size: .8rem; }
+  .cal-legend i { display: inline-block; width: .9rem; height: .9rem; border-radius: 4px; border: 1.5px solid var(--c); background: color-mix(in srgb, var(--c) 18%, transparent); vertical-align: -2px; margin-right: 4px; }
+  .otp-row { display: grid; gap: var(--s2); grid-template-columns: 1fr; }
+  @media (min-width: 560px) { .otp-row { grid-template-columns: 1fr auto; align-items: end; } }
+  .bad { color: var(--error-text); }
+  .okay { color: var(--success); }
+  .price-box h3 { margin-bottom: var(--s2); }
+  .price-box details { margin-top: var(--s2); } .price-box summary { color: var(--gold); }
+  .tags { display: flex; flex-wrap: wrap; gap: var(--s2); list-style: none; margin: 0; padding: 0; }
+  .tags li { font-size: .72rem; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--gold); color: var(--gold); }
+  .acct-head { display: flex; flex-wrap: wrap; gap: var(--s3); align-items: center; justify-content: space-between; }
+  .acct-list { display: grid; gap: var(--s6); margin-top: var(--s4); }
+  /* ---------- Preferences bar, helper cards, floating Call me back ---------- */
+  .helpcard { display: flex; flex-wrap: wrap; gap: var(--s4); align-items: center; justify-content: space-between; padding: var(--s6); }
+  .helpcard .btn { min-height: 56px; font-size: 1.05rem; }
+  .callme { position: fixed; right: var(--s4); bottom: var(--s4); z-index: 30; min-height: 56px; padding-inline: var(--s6); border-radius: 999px; font-size: 1.05rem; box-shadow: 0 6px 24px rgba(0,0,0,.45); }
+  @media (max-width: 600px) { .callme { right: var(--s3); bottom: var(--s3); padding-inline: var(--s4); } main { padding-bottom: 6rem; } }
+  #toast { bottom: 5.5rem; }
+  #cm_done { display: grid; gap: var(--s2); }
   @media print {
-    header.top, footer, .hero, .noprint, #toast, .skip { display: none !important; }
+    header.top, footer, .hero, .noprint, #toast, .skip, .callme { display: none !important; }
     .card { border: 1px solid var(--border); }
   }
 </style>
 </head>
 <body>
-<a class="skip" href="#view">Skip to content</a>
+<a class="skip" href="#view" data-i18n="skip.link">Skip to content</a>
 <div id="toast" role="status" aria-live="polite"></div>
 
 <header class="top">
   <div class="bar">
-    <a class="brand" href="#/" style="color:inherit;text-decoration:none" aria-label="Mantralayam Rooms, home">
+    <a class="brand" href="#/" style="color:inherit;text-decoration:none" data-i18n-attr="title:brand.aria" title="Mantralayam Rooms, home">
       <img src="/images/logo-transparent.png" alt="" width="56" height="56">
-      <div>Mantralayam Rooms<small>Pilgrim accommodation</small></div>
+      <div>Mantralayam Rooms<small data-i18n="brand.tagline">Pilgrim accommodation</small></div>
     </a>
-    <button class="btn" id="menu-btn" aria-expanded="false" aria-controls="nav">Menu</button>
-    <nav class="main" id="nav" aria-label="Main">
+    <button class="btn" id="menu-btn" aria-expanded="false" aria-controls="nav" data-i18n="menu.button">Menu</button>
+    <nav class="main" id="nav" aria-label="Main" data-i18n-attr="aria-label:nav.aria">
       <ul>
-        <li><a href="#/" data-r="home">Book a room</a></li>
-        <li><a href="#/booking" data-r="booking">My booking</a></li>
-        <li><a href="http://127.0.0.1:8002/staff">Staff login</a></li>
+        <li><a href="#/" data-r="home" data-i18n="nav.book">Book a room</a></li>
+        <li><a href="#/account" data-r="account" data-i18n="nav.account">My bookings (sign in)</a></li>
+        <li><a href="#/booking" data-r="booking" data-i18n="nav.booking">My booking</a></li>
+        <li><details><summary data-i18n="nav.info">Plan your visit</summary>
+          <ul>
+          <li><a href="#/policy" data-r="policy" data-i18n="nav.policy">Cancellation and refunds</a></li>
+          <li><a href="#/know" data-r="know" data-i18n="nav.know">Know before you go</a></li>
+          <li><a href="#/directions" data-r="directions" data-i18n="nav.directions">Directions and map</a></li>
+          <li><a href="#/pilgrim" data-r="pilgrim" data-i18n="nav.pilgrim">Pilgrim information</a></li>
+          <li><a href="#/contact" data-r="contact" data-i18n="nav.contact">Contact and emergency</a></li>
+          <li><a href="#/faq" data-r="faq" data-i18n="nav.faq">FAQ</a></li>
+          <li><a href="#/privacy" data-r="privacy" data-i18n="nav.privacy">Privacy policy</a></li>
+          </ul></details></li>
+        <li><a href="http://127.0.0.1:8002/staff" data-staff data-i18n="nav.staff">Staff login</a></li>
+        <li><div class="a11y" role="group" aria-label="Display" data-i18n-attr="aria-label:a11y.group"><button type="button" class="btn small secondary" id="a11y_text" aria-pressed="false" data-i18n-attr="title:a11y.text"><span aria-hidden="true">A+</span><span class="sr-only" data-i18n="a11y.text">Larger text</span></button>
+          <button type="button" class="btn small secondary" id="a11y_contrast" aria-pressed="false" data-i18n-attr="title:a11y.contrast"><span aria-hidden="true">&#9680;</span><span class="sr-only" data-i18n="a11y.contrast">High contrast</span></button></div></li>
+        <li><select id="lang" aria-label="Language" data-i18n-attr="aria-label:lang.label"></select></li>
       </ul>
     </nav>
   </div>
 </header>
 
 <div class="hero" id="hero">
-  <img src="/images/hero-final-braid-brown-text-both.png" width="1752" height="564" alt="Sri Raghavendra Swamy of Mantralayam holding a small idol of Lord Krishna, on a gold kolam pattern" loading="eager" fetchpriority="high">
+  <img src="/images/hero-final-braid-brown-text-both.png" width="1752" height="564" alt="Sri Raghavendra Swamy of Mantralayam holding a small idol of Lord Krishna, on a gold kolam pattern" data-i18n-attr="alt:hero.alt" loading="eager" fetchpriority="high">
 </div>
 
+<div class="wrap" id="notices"></div>
+<div class="wrap"><div class="msg" id="offline" role="status" hidden></div></div>
 <main>
   <div class="wrap" id="view" tabindex="-1"></div>
 </main>
 
 <footer>
   <div class="wrap">
-    <p>Bookings are held in your name and paid at the property counter on arrival. Please carry the ID proof you entered while booking.</p>
-    <p style="margin-top:.5rem">Need help? Call the property you booked, or <a href="#/booking">look up your booking</a>. · <a href="http://127.0.0.1:8002/staff">Staff login</a></p>
+    <nav aria-label="Information" data-i18n-attr="aria-label:footer.info_aria"><ul class="footlinks">
+      <li><a href="#/policy" data-i18n="nav.policy">Cancellation and refunds</a></li>
+      <li><a href="#/know" data-i18n="nav.know">Know before you go</a></li>
+      <li><a href="#/directions" data-i18n="nav.directions">Directions and map</a></li>
+      <li><a href="#/pilgrim" data-i18n="nav.pilgrim">Pilgrim information</a></li>
+      <li><a href="#/contact" data-i18n="nav.contact">Contact and emergency</a></li>
+      <li><a href="#/faq" data-i18n="nav.faq">FAQ</a></li>
+      <li><a href="#/privacy" data-i18n="nav.privacy">Privacy policy</a></li>
+      <li><a href="#/festivals" data-i18n="fest.link">Festivals</a></li>
+      <li><a href="#/subscribe" data-i18n="sub.link">Festival updates</a></li>
+      <li><a href="#" id="pwa_install" hidden data-i18n="pwa.install">Install this app</a></li>
+    </ul></nav>
+    <p data-i18n="footer.pay">Bookings are held in your name and paid at the property counter on arrival. Please carry the ID proof you entered while booking.</p>
+    <p style="margin-top:.5rem"><span data-i18n="footer.help">Need help? Call the property you booked, or</span> <a href="#/booking" data-i18n="footer.lookup">look up your booking</a>. · <a href="http://127.0.0.1:8002/staff" data-staff data-i18n="nav.staff">Staff login</a></p>
   </div>
 </footer>
 
 <dialog id="bdlg" aria-labelledby="bdlg-h">
   <form id="bform">
-    <h2 id="bdlg-h">Confirm your booking</h2>
+    <h2 id="bdlg-h" data-i18n="book.title">Confirm your booking</h2>
     <div class="summary"><dl class="facts" id="bsum"></dl></div>
     <div class="msg" id="b_peak" role="note" hidden></div>
     <p class="msg" id="b_hold"></p>
     <span id="b_holdlive" role="status" aria-live="polite" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden"></span>
     <div class="row">
-      <div><label for="b_rooms" class="req">Number of rooms</label><select id="b_rooms" name="rooms" required></select></div>
-      <div><label for="b_guests" class="req">Number of guests</label><input id="b_guests" name="guests" type="number" min="1" max="200" required inputmode="numeric"></div>
+      <div><label for="b_rooms" class="req" data-i18n="book.rooms">Number of rooms</label><select id="b_rooms" name="rooms" required></select></div>
+      <div><label for="b_guests" class="req" data-i18n="book.guests">Number of guests</label><input id="b_guests" name="guests" type="number" min="1" max="200" required inputmode="numeric"></div>
+    </div>
+    <div class="row">
+      <div><label for="b_children" data-i18n="book.children">Of whom children</label><input id="b_children" name="children" type="number" min="0" value="0" inputmode="numeric"></div>
+      <div id="b_beds_wrap" hidden><label for="b_beds" data-i18n="book.beds">Extra beds</label><select id="b_beds" name="extra_beds"></select></div>
     </div>
     <p class="hint" id="b_hint"></p>
-    <div><label for="b_name" class="req">Guest name</label><input id="b_name" name="guest_name" required autocomplete="name" maxlength="100"></div>
+    <div><label for="b_name" class="req" data-i18n="book.name">Name of the guest who will stay</label><input id="b_name" name="guest_name" required autocomplete="off" maxlength="100"></div>
+    <label class="check1"><input type="checkbox" id="b_other" name="for_other"> <span data-i18n="book.other">I am booking for someone else</span></label>
+    <div id="b_other_box" class="morebody" hidden>
+      <div><label for="b_booker" class="req" data-i18n="book.booker">Your name (the person booking)</label><input id="b_booker" name="booker_name" maxlength="100" autocomplete="name"></div>
+      <p class="hint" data-i18n="book.arrival_contact_hint">Who should the property phone when the guest arrives?</p>
+      <div class="row">
+        <div><label for="b_acname" data-i18n="book.ac_name">Arrival contact name</label><input id="b_acname" name="arrival_contact_name" maxlength="100"></div>
+        <div><label for="b_acphone" data-i18n="book.ac_phone">Arrival contact mobile</label><input id="b_acphone" name="arrival_contact_phone" type="tel" inputmode="tel" pattern="[+]?[0-9 \-]{10,16}" title="10 to 13 digits" data-i18n-attr="title:book.phone_title" maxlength="20"></div>
+      </div>
+    </div>
+    <div class="otp-row">
+      <div><label for="b_phone" class="req" data-i18n="book.my_phone">Your mobile number</label><input id="b_phone" name="phone" type="tel" required inputmode="tel" autocomplete="tel" pattern="[+]?[0-9 \-]{10,16}" title="10 to 13 digits" data-i18n-attr="title:book.phone_title" maxlength="20"></div>
+      <button type="button" class="btn secondary" id="b_sendotp" data-i18n="otp.send">Send code</button>
+    </div>
+    <div id="b_captcha"></div>
+    <div id="b_otp_box" class="otp-row" hidden>
+      <div><label for="b_code" data-i18n="otp.code">6-digit code</label><input id="b_code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}"></div>
+      <button type="button" class="btn" id="b_verify" data-i18n="otp.verify">Verify</button>
+    </div>
+    <p class="hint" id="b_otp_status" role="status" aria-live="polite"></p>
+    <p class="hint" id="b_otp_hint" data-i18n="otp.needed">Verify your mobile number to confirm the booking. We send a code by SMS.</p>
     <div class="row">
-      <div><label for="b_phone" class="req">Mobile number</label><input id="b_phone" name="phone" type="tel" required inputmode="tel" autocomplete="tel" pattern="[+]?[0-9 \-]{10,16}" title="10 to 13 digits" maxlength="20"></div>
-      <div><label for="b_email">Email (optional)</label><input id="b_email" name="email" type="email" autocomplete="email" maxlength="120"></div>
+      <div><label for="b_idtype" class="req" data-i18n="book.idtype">ID proof type</label><select id="b_idtype" name="id_type" required></select></div>
+      <div><label for="b_idno" class="req" data-i18n="book.idno">Last 4 characters of the ID proof number</label><input id="b_idno" name="id_number" required maxlength="4" minlength="4" autocomplete="off" aria-describedby="b_idno_hint"><p id="b_idno_hint" class="hint small" data-i18n="book.idno_hint">Only these 4 characters are kept. Please bring the ID itself: the front desk checks it at check-in.</p></div>
     </div>
     <div class="row">
-      <div><label for="b_idtype" class="req">ID proof type</label><select id="b_idtype" name="id_type" required></select></div>
-      <div><label for="b_idno" class="req">ID proof number</label><input id="b_idno" name="id_number" required maxlength="30" autocomplete="off"></div>
+      <div><label for="b_promo" data-i18n="book.promo">Promo or donor code (optional)</label><input id="b_promo" name="promo_code" maxlength="32" autocomplete="off" autocapitalize="characters"></div>
+      <div style="align-self:end"><button type="button" class="btn secondary" id="b_applypromo" data-i18n="book.apply">Apply</button></div>
     </div>
-    <div class="row">
-      <div><label for="b_arrive">Expected arrival time (optional)</label><input id="b_arrive" name="arrival_time" type="time"></div>
-      <div><label for="b_darshan">Darshan date (optional)</label><input id="b_darshan" name="darshan_date" type="date"></div>
-    </div>
-    <div><label for="b_req">Special requests (optional)</label><textarea id="b_req" name="remarks" maxlength="500" placeholder="For example: ground floor, elderly guests"></textarea></div>
-    <div inert style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden"><label for="b_website">Website (leave this empty)</label><input id="b_website" name="website" tabindex="-1" autocomplete="off"></div>
-    <p class="msg"><strong>Pay at counter on arrival.</strong> Nothing is charged online.</p>
+    <p class="hint" id="b_promo_msg" role="status" hidden></p>
+    <div class="summary price-box" id="b_price" aria-live="polite"></div>
+    <fieldset class="pay" id="b_seva" hidden><legend data-i18n="seva.title">Sevas and packages (optional)</legend><div id="b_seva_body"></div><p class="hint" data-i18n="seva.note">Sevas are not taxed and promo codes do not apply to them. A package's sevas fall on fixed days of your stay.</p></fieldset>
+    <fieldset class="pay" id="b_pay" hidden><legend data-i18n="pay.title">Payment</legend><div id="b_pay_opts"></div>
+      <p class="hint secure" id="b_secure" hidden><span aria-hidden="true">&#128274;</span> <span><strong data-i18n="pay.secure">Secure payment</strong>. <span data-i18n="pay.secure_text">Pay with UPI, cards or net banking. Your card details go straight to the payment provider: we never see or store them.</span> <span id="b_testmode" data-i18n="pay.test" hidden>Test mode: no real money is taken.</span></span></p>
+    </fieldset>
+    <details class="more" id="b_more"><summary data-i18n="book.more">More details (optional)</summary><div class="morebody">
+      <div><label for="b_email" data-i18n="book.email">Email (optional)</label><input id="b_email" name="email" type="email" autocomplete="email" maxlength="120"></div>
+      <div class="row">
+        <div><label for="b_arrive" data-i18n="book.arrive">Expected arrival time (optional)</label><input id="b_arrive" name="arrival_time" type="time"></div>
+        <div><label for="b_darshan" data-i18n="book.darshan">Darshan date (optional)</label><input id="b_darshan" name="darshan_date" type="date"></div>
+      </div>
+      <div><label for="b_req" data-i18n="book.requests">Special requests (optional)</label><textarea id="b_req" name="remarks" maxlength="500" placeholder="For example: ground floor, elderly guests" data-i18n-attr="placeholder:book.requests_ph"></textarea></div>
+    </div></details>
+    <label class="check1"><input type="checkbox" id="b_save" name="save_details"> <span data-i18n="book.save">Save my name, email and ID type for next time (the ID number is never saved)</span></label>
+    <div inert style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden"><label for="b_website" data-i18n="book.honeypot">Website (leave this empty)</label><input id="b_website" name="website" tabindex="-1" autocomplete="off"></div>
+    <div class="msg" id="b_official" role="note"></div>
+    <div class="msg" id="b_policy" role="note"></div>
     <p id="b_err" class="msg error" role="alert" hidden></p>
     <div class="foot">
-      <button type="button" class="btn secondary" id="b_back">Back</button>
-      <button type="submit" class="btn" id="b_submit">Confirm booking</button>
+      <button type="button" class="btn secondary" id="b_back" data-i18n="book.back">Back</button>
+      <button type="submit" class="btn" id="b_submit" data-i18n="book.submit">Confirm booking</button>
+    </div>
+  </form>
+</dialog>
+
+<button type="button" class="btn callme noprint" id="callme"><span aria-hidden="true">&#9742;</span> <span data-i18n="cm.open">Call me back</span></button>
+
+<dialog id="cmdlg" aria-labelledby="cmdlg-h">
+  <form id="cmform">
+    <h2 id="cmdlg-h" data-i18n="cm.title">Call me back</h2>
+    <p class="muted" data-i18n="cm.intro">Leave your name and mobile number. The property will phone you. You do not need to give any other details.</p>
+    <div id="cm_fields" style="display:grid;gap:var(--s3)">
+      <div><label for="cm_name" class="req" data-i18n="cb.name">Your name</label><input id="cm_name" name="name" required autocomplete="name" maxlength="100"></div>
+      <div><label for="cm_phone" class="req" data-i18n="book.phone">Mobile number</label><input id="cm_phone" name="phone" type="tel" required inputmode="tel" autocomplete="tel" pattern="[+]?[0-9 \-]{10,16}" title="10 to 13 digits" data-i18n-attr="title:book.phone_title" maxlength="20"></div>
+      <div><label for="cm_time" data-i18n="cm.time">Best time to call</label><select id="cm_time" name="call_time">
+        <option value="any" data-i18n="calltime.any">Any time</option><option value="morning" data-i18n="calltime.morning">Morning</option>
+        <option value="afternoon" data-i18n="calltime.afternoon">Afternoon</option><option value="evening" data-i18n="calltime.evening">Evening</option></select></div>
+      <div inert style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden"><label for="cm_website" data-i18n="book.honeypot">Website (leave this empty)</label><input id="cm_website" name="website" tabindex="-1" autocomplete="off"></div>
+    </div>
+    <div id="cm_captcha"></div>
+    <p id="cm_err" class="msg error" role="alert" hidden></p>
+    <div id="cm_done" class="msg" role="status" tabindex="-1" hidden></div>
+    <div class="foot">
+      <button type="button" class="btn secondary" id="cm_close" data-i18n="cm.close">Close</button>
+      <button type="submit" class="btn" id="cm_submit" data-i18n="cb.submit">Request a call-back</button>
     </div>
   </form>
 </dialog>
 
 <dialog id="cdlg" aria-labelledby="cdlg-h">
   <form id="cform">
-    <h2 id="cdlg-h">Cancel this booking?</h2>
+    <h2 id="cdlg-h" data-i18n="cancel.title">Cancel this booking?</h2>
     <p class="muted" id="c_intro"></p>
-    <div><label for="c_reason" class="req">Reason for cancellation</label><textarea id="c_reason" required maxlength="300"></textarea></div>
+    <div><label for="c_reason" class="req" data-i18n="cancel.reason">Reason for cancellation</label><textarea id="c_reason" required maxlength="300"></textarea></div>
     <p id="c_err" class="msg error" role="alert" hidden></p>
     <div class="foot">
-      <button type="button" class="btn secondary" id="c_back">Keep my booking</button>
-      <button type="submit" class="btn danger" id="c_submit">Cancel booking</button>
+      <button type="button" class="btn secondary" id="c_back" data-i18n="cancel.keep">Keep my booking</button>
+      <button type="submit" class="btn danger" id="c_submit" data-i18n="cancel.submit">Cancel booking</button>
     </div>
   </form>
 </dialog>
 
-<script>
+<dialog id="gdlg" aria-labelledby="gdlg-h">
+  <form id="gform">
+    <h2 id="gdlg-h"></h2>
+    <div id="g_body" style="display:grid;gap:var(--s3)"></div>
+    <p id="g_err" class="msg error" role="alert" hidden></p>
+    <div class="foot">
+      <button type="button" class="btn secondary" id="g_close" data-i18n="cm.close">Close</button>
+      <button type="submit" class="btn" id="g_submit" hidden></button>
+    </div>
+  </form>
+</dialog>
+
+<script src="/i18n.js"></script>
+<script nonce="__NONCE__">
 "use strict";
+// replaceChildren would print the word "null" for an empty slot and "a,b" for an array: skip empty values and flatten lists
+{ const rc = Element.prototype.replaceChildren; Element.prototype.replaceChildren = function (...k) { return rc.apply(this, k.flat(2).filter((x) => x != null && x !== false)); }; }
 const $ = (s, r = document) => r.querySelector(s);
-const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0, useGrouping: false });
-const fmtDate = (s) => new Intl.DateTimeFormat("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" }).format(new Date(s + "T00:00:00"));
-const fmtTime = (t) => new Intl.DateTimeFormat("en-IN", { hour: "numeric", minute: "2-digit" }).format(new Date("2000-01-01T" + t));
-const fmtWhen = (s) => new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(s));
+// Dates, times and money follow the visitor's language. `t` is the translation function: do not use it as a variable name (room types are `rt`).
+const LOC = () => ({ en: "en-IN", te: "te-IN", kn: "kn-IN", ta: "ta-IN", hi: "hi-IN" })[I18N.lang] || "en-IN";
+const inr = { format: (n) => new Intl.NumberFormat(LOC(), { style: "currency", currency: "INR", maximumFractionDigits: 0, useGrouping: false }).format(n) };
+const fmtDate = (s) => new Intl.DateTimeFormat(LOC(), { weekday: "short", day: "numeric", month: "short", year: "numeric" }).format(new Date(s + "T00:00:00"));
+const fmtTime = (x) => new Intl.DateTimeFormat(LOC(), { hour: "numeric", minute: "2-digit" }).format(new Date("2000-01-01T" + x));
+const fmtWhen = (s) => new Intl.DateTimeFormat(LOC(), { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(s));
+const shortDate = (s) => new Intl.DateTimeFormat(LOC(), { day: "numeric", month: "short" }).format(new Date(s + "T00:00:00"));
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const addDays = (s, n) => { const d = new Date(s + "T00:00:00"); d.setDate(d.getDate() + n); return iso(d); };
 
@@ -205,53 +408,145 @@ function h(tag, props, ...kids) {
   return e;
 }
 const S = { info: null, search: null, last: null };
+const nights = (n) => t("nights", { count: n });
 const peakLines = (ps) => ps.map((p) => h("div", null, h("strong", null, p.name), p.note ? h("p", null, p.note) : null,
-  p.max_nights || p.max_rooms ? h("p", { class: "small" }, "Online bookings in this period: " + [p.max_nights && `up to ${p.max_nights} nights`, p.max_rooms && `up to ${p.max_rooms} room${p.max_rooms > 1 ? "s" : ""}`].filter(Boolean).join(", ") + ".") : null));
+  p.max_nights || p.max_rooms ? h("p", { class: "small" }, t("peak.limits", { limits: [p.max_nights && t("peak.nights", { count: p.max_nights }), p.max_rooms && t("peak.rooms", { count: p.max_rooms })].filter(Boolean).join(", ") })) : null));
 const peakOverlap = (a, b) => (S.info.peak_periods || []).filter((p) => p.start_date < b && p.end_date >= a);  // a period's end date is its last night
-const ID_TYPES = ["Aadhaar", "Voter ID", "Driving Licence", "Passport", "PAN", "Other"];
+const ID_TYPES = [["Aadhaar", "id.aadhaar"], ["Voter ID", "id.voter"], ["Driving Licence", "id.driving"], ["Passport", "id.passport"], ["PAN", "id.pan"], ["Other", "id.other"]];  // the server takes the English value
+const statusLabel = (s) => (I18N.has("status." + s) ? t("status." + s) : s);
 
-function toast(msg) { const t = $("#toast"); t.replaceChildren(h("div", { class: "t" }, msg)); clearTimeout(toast.id); toast.id = setTimeout(() => t.replaceChildren(), 5000); }
+// ---------- errors: the API answers in English; each message has a template under err.* in the locale files ----------
+let ERR = null;
+const rx = (tpl) => new RegExp("^" + tpl.replace(/[.*+?^$()|[\]\\]/g, "\\$&").replace(/\{(\w+)\}/g, "(?<$1>.+?)") + "$");
+function errText(msg) {
+  ERR ||= I18N.source("err.").filter(([k]) => !k.startsWith("err.retry_")).map(([k, tpl]) => [k, rx(tpl)]);
+  const wait = /^(.*?) Please try again in (\d+) (seconds|minutes)\.$/.exec(msg);
+  if (wait) return t("err.retry_" + wait[3], { what: errText(wait[1]), n: wait[2] });
+  for (const [k, re] of ERR) { const m = re.exec(msg); if (m) return t(k, m.groups || {}); }
+  return msg;
+}
+const failure = (raw) => Object.assign(new Error(errText(raw || "Something went wrong. Please try again.")), { raw: raw || "" });  // .raw is the English text, for logic
+function toast(msg) { const el = $("#toast"); el.replaceChildren(h("div", { class: "t" }, msg)); clearTimeout(toast.id); toast.id = setTimeout(() => el.replaceChildren(), 5000); }
 async function api(path, body) {
-  const res = await fetch(path, { method: body === undefined ? "GET" : "POST", headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || "Something went wrong. Please try again.");
+  let res, data;
+  const headers = { "Content-Type": "application/json" };
+  if (body !== undefined && path.startsWith("/api/me/")) headers["X-CSRF-Token"] = S.csrf || "";  // signed-in guest POSTs carry the session's CSRF token
+  try {
+    res = await fetch(path, { method: body === undefined ? "GET" : "POST", headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    data = await res.json().catch(() => ({}));
+  } catch { throw Object.assign(new Error(t("err.network")), { raw: "" }); }
+  if (!res.ok) throw Object.assign(failure(data.error), { status: res.status });
   return data;
 }
-const loading = () => h("div", { role: "status", "aria-label": "Loading" }, [1, 2].map(() => h("div", { class: "skeleton", style: "height:9rem" })));
+const loading = () => h("div", { role: "status", "aria-label": t("loading") }, [1, 2].map(() => h("div", { class: "skeleton", style: "height:9rem" })));
 const note = (cls, ...k) => h("div", { class: "msg " + cls, role: cls === "error" ? "alert" : "status" }, ...k);
 const dl = (pairs, cls) => h("dl", { class: "facts " + (cls || "") }, pairs.filter(Boolean).flatMap(([k, v, c]) => [h("dt", { class: c }, k), h("dd", { class: c }, v)]));
+const field = (id, label, { tag = "input", ...p } = {}, req) => h("div", null, h("label", { for: id, class: req ? "req" : null }, label), h(tag, { id, required: req, ...p }));
+const honeypot = (id) => h("div", { inert: true, style: "position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden" }, h("label", { for: id }, t("book.honeypot")), h("input", { id, name: "website", tabindex: "-1", autocomplete: "off" }));
+
+// ---------- optional CAPTCHA (CAPTCHA_PROVIDER on the server; absent = nothing is shown) ----------
+let turnstileReady = null;
+const loadTurnstile = () => (turnstileReady ||= new Promise((ok, no) => { const s = h("script", { src: "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit", async: true }); s.onload = ok; s.onerror = no; document.head.append(s); }));
+function captchaBox(host) {  // renders the check into `host`; returns { token(), reset() }
+  const c = S.info.captcha;
+  host.replaceChildren(); host.hidden = !c;
+  if (!c) return { token: () => "", reset() {} };
+  if (c.provider === "mock") {  // development stand-in: a tick box
+    const cb = h("input", { type: "checkbox", id: host.id + "_cb" });
+    host.append(h("label", { class: "check1", for: cb.id }, cb, " ", t("captcha.human")));
+    return { token: () => (cb.checked ? "mock-pass" : ""), reset() { cb.checked = false; } };
+  }
+  let tok = "", wid = null;
+  loadTurnstile().then(() => { wid = turnstile.render(host, { sitekey: c.site_key, callback: (x) => { tok = x; }, "expired-callback": () => { tok = ""; } }); }).catch(() => {});
+  return { token: () => tok, reset() { tok = ""; if (wid != null) turnstile.reset(wid); } };
+}
+const filterParams = () => ({ senior: S.search?.senior ? "1" : "", ground_floor: S.search?.ground_floor ? "1" : "" });
+
+// ---------- one reusable dialog for the smaller flows (calendar, change dates, edit details) ----------
+function openDialog({ title, body, submit, onSubmit, opener }) {
+  const d = $("#gdlg"), sb = $("#g_submit");
+  $("#gdlg-h").textContent = title; $("#g_body").replaceChildren(...[].concat(body)); $("#g_err").hidden = true;
+  sb.hidden = !onSubmit; sb.textContent = submit || ""; sb.disabled = false;
+  $("#gform").onsubmit = async (e) => {
+    e.preventDefault(); sb.disabled = true; $("#g_err").hidden = true;
+    try { await onSubmit(); } catch (x) { $("#g_err").textContent = x.message; $("#g_err").hidden = false; sb.disabled = false; }
+  };
+  d.addEventListener("close", () => { if (opener?.isConnected) opener.focus(); }, { once: true });
+  d.showModal();
+}
+$("#g_close").onclick = () => $("#gdlg").close();
+
+// ---------- the price breakdown: the same rows in the booking dialog and on the booking card ----------
+function priceBox(q, title) {
+  const m = (n) => inr.format(n), varied = q.night_prices.some((x) => x.price !== q.night_prices[0].price), peak = q.night_prices.some((x) => x.peak);
+  const rows = [[t("price.rooms", { rooms: q.rooms, nights: nights(q.nights) }), m(q.room_charge)],
+    q.extra_bed_charge ? [t("price.beds", { count: q.extra_beds }), m(q.extra_bed_charge)] : null,
+    q.child_charge ? [t("price.children", { count: q.children }), m(q.child_charge)] : null,
+    q.discount ? [t("price.discount", { name: q.discount.code || q.discount.label }), "−" + m(q.discount.amount)] : null,
+    q.tax ? [t("price.tax", { percent: q.tax_percent }), m(q.tax)] : null,
+    ...(q.sevas || []).map((x) => [`${x.name} × ${x.qty} (${fmtDate(x.date)})`, m(x.amount)]),
+    [t("sum.total"), m(q.total), "total"],
+    q.advance ? [t("price.advance", { percent: q.advance_percent }), m(q.advance)] : null, q.advance ? [t("price.balance"), m(q.balance)] : null];
+  return h("div", { class: "price-box" }, h("h3", null, title || t("price.title")), dl(rows),
+    peak ? h("p", { class: "hint" }, t("price.peak_note")) : null,
+    (q.sevas || []).length ? h("p", { class: "hint" }, t("price.seva_note")) : null,
+    PAYCFG().enabled ? null : h("p", { class: "hint" }, q.advance ? t("price.advance_note") : t("price.nothing_online")),
+    q.night_prices.length > 1 || varied ? h("details", null, h("summary", null, t("price.per_night")), dl(q.night_prices.map((x) => [fmtDate(x.date) + (x.peak ? " ★" : ""), m(x.price)]))) : null);
+}
+
+// ---------- call me back: the quick form for anyone who would rather be phoned (uses the call-back queue) ----------
+let cmCap = { token: () => "", reset() {} };
+function openCallMe() {
+  const f = $("#cmform"); f.reset(); $("#cm_err").hidden = true; $("#cm_done").hidden = true; $("#cm_fields").hidden = false; $("#cm_submit").hidden = false; $("#cm_submit").disabled = false;
+  cmCap = captchaBox($("#cm_captcha")); $("#cmdlg").showModal(); $("#cm_name").focus();
+}
+$("#callme").onclick = openCallMe;
+$("#cm_close").onclick = () => $("#cmdlg").close();
+$("#cmform").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = $("#cm_submit"), v = Object.fromEntries(new FormData($("#cmform")));
+  btn.disabled = true; $("#cm_err").hidden = true;
+  try {
+    await api("/api/public/callback", { ...v, lang: I18N.lang, captcha_token: cmCap.token() });
+    $("#cm_fields").hidden = true; btn.hidden = true;
+    $("#cm_done").replaceChildren(h("strong", null, t("cb.thanks")), h("p", null, t("cb.phone_you", { phone: v.phone }))); $("#cm_done").hidden = false; $("#cm_done").focus();
+  } catch (x) { $("#cm_err").textContent = x.message; $("#cm_err").hidden = false; btn.disabled = false; cmCap.reset(); }
+});
 
 // ---------- home: search + results + properties ----------
 function homeView(root) {
   const i = S.info, today = i.today;
   const s = S.search || { check_in: addDays(today, 1), check_out: addDays(today, 2), guests: 2, property_id: "", room_type_id: "" };
   const opt = (v, l, sel) => h("option", { value: v, selected: String(v) === String(sel) }, l);
-  const f = h("form", { class: "card search", id: "search", "aria-label": "Check availability" },
-    h("div", null, h("label", { for: "s_in", class: "req" }, "Check-in"), h("input", { id: "s_in", name: "check_in", type: "date", required: true, min: today, max: i.last_check_in, value: s.check_in })),
-    h("div", null, h("label", { for: "s_out", class: "req" }, "Check-out"), h("input", { id: "s_out", name: "check_out", type: "date", required: true, min: addDays(today, 1), value: s.check_out })),
-    h("div", null, h("label", { for: "s_guests", class: "req" }, "Guests"), h("input", { id: "s_guests", name: "guests", type: "number", min: 1, max: 200, required: true, inputmode: "numeric", value: s.guests })),
-    h("div", null, h("label", { for: "s_prop" }, "Property (optional)"), h("select", { id: "s_prop", name: "property_id" }, opt("", "Any property", s.property_id), i.properties.map((p) => opt(p.id, p.name, s.property_id)))),
-    h("div", null, h("label", { for: "s_type" }, "Room type (optional)"), h("select", { id: "s_type", name: "room_type_id" }, opt("", "Any type", s.room_type_id), i.room_types.map((t) => opt(t.id, t.name, s.room_type_id)))),
+  const f = h("form", { class: "card search", id: "search", "aria-label": t("search.title") },
+    h("div", null, h("label", { for: "s_in", class: "req" }, t("search.in")), h("input", { id: "s_in", name: "check_in", type: "date", required: true, min: today, max: i.last_check_in, value: s.check_in })),
+    h("div", null, h("label", { for: "s_out", class: "req" }, t("search.out")), h("input", { id: "s_out", name: "check_out", type: "date", required: true, min: addDays(today, 1), value: s.check_out })),
+    h("div", null, h("label", { for: "s_guests", class: "req" }, t("search.guests")), h("input", { id: "s_guests", name: "guests", type: "number", min: 1, max: 200, required: true, inputmode: "numeric", value: s.guests })),
+    h("details", { class: "span more" }, h("summary", null, t("search.filters")), h("div", { class: "morebody" },
+      h("div", null, h("label", { for: "s_prop" }, t("search.property")), h("select", { id: "s_prop", name: "property_id" }, opt("", t("search.any_property"), s.property_id), i.properties.map((p) => opt(p.id, p.name, s.property_id)))),
+      h("div", null, h("label", { for: "s_type" }, t("search.type")), h("select", { id: "s_type", name: "room_type_id" }, opt("", t("search.any_type"), s.room_type_id), i.room_types.map((x) => opt(x.id, x.name, s.room_type_id)))),
+      ...[["senior", "search.senior", i.filters.senior], ["ground_floor", "search.ground", i.filters.ground]].filter((x) => x[2]).map(([n, k]) => h("label", { class: "check1" }, h("input", { type: "checkbox", name: n, checked: !!s[n] }), " " + t(k))))),
     h("p", { class: "stay span", id: "stay", "aria-live": "polite" }),
     h("div", { class: "msg span", id: "peak", "aria-live": "polite", hidden: true }),
-    h("button", { class: "btn", type: "submit" }, "Check availability"));
+    h("div", { class: "actions span" }, h("button", { class: "btn", type: "submit" }, t("search.submit")),
+      h("button", { class: "btn secondary", type: "button", onclick: (e) => openCalendar(e.currentTarget) }, t("cal.open"))));
   const syncTypes = () => {
     const pr = i.properties.find((p) => String(p.id) === f.elements.property_id.value), sel = f.elements.room_type_id, cur = sel.value;
-    const ts = i.room_types.filter((t) => !pr || pr.type_ids.includes(t.id));
-    sel.replaceChildren(opt("", "Any type", ""), ...ts.map((t) => opt(t.id, t.name, cur)));
+    const ts = i.room_types.filter((x) => !pr || pr.type_ids.includes(x.id));
+    sel.replaceChildren(opt("", t("search.any_type"), ""), ...ts.map((x) => opt(x.id, x.name, cur)));
   };
   f.elements.property_id.addEventListener("change", syncTypes); syncTypes();
-  const results = h("section", { "aria-labelledby": "res-h" }, h("h2", { id: "res-h", tabindex: "-1" }, "Available rooms"), h("div", { id: "results", "aria-live": "polite" }));
+  const results = h("section", { "aria-labelledby": "res-h" }, h("h2", { id: "res-h", tabindex: "-1" }, t("results.title")), h("div", { id: "results", "aria-live": "polite" }));
   const st = i.settings;
-  const policy = h("section", { "aria-labelledby": "know-h" }, h("h2", { id: "know-h" }, "Good to know"), h("div", { class: "info" },
-    h("div", { class: "card" }, h("h3", null, "Check-in and check-out"), h("p", null, `Check-in from ${fmtTime(st.checkin_time)}. Check-out by ${fmtTime(st.checkout_time)}.`)),
-    h("div", { class: "card" }, h("h3", null, "Payment"), h("p", null, "Pay at the counter when you arrive. Nothing is charged online.")),
-    h("div", { class: "card" }, h("h3", null, "Cancellation"), h("p", null, st.guest_cancel_cutoff_hours ? `Cancel online up to ${st.guest_cancel_cutoff_hours} hours before check-in. After that, please call the property.` : "Cancel online until check-in time."))));
-  root.replaceChildren(f, results, policy);
+  const policy = h("section", { "aria-labelledby": "know-h" }, h("h2", { id: "know-h" }, t("good.title")), h("div", { class: "info" },
+    h("div", { class: "card" }, h("h3", null, t("know.times_h")), h("p", null, t("know.times", { checkin: fmtTime(st.checkin_time), checkout: fmtTime(st.checkout_time) }))),
+    h("div", { class: "card" }, h("h3", null, t("good.payment")), h("p", null, t(PAYCFG().enabled ? "good.payment_online" : "good.payment_text"))),
+    h("div", { class: "card" }, h("h3", null, t("good.cancel")), h("p", null, policyLines().slice(0, 2).join(" ")))));
+  root.replaceChildren(rebookCard() || "", f, results, festivalCard() || "", policy);
   const stay = () => {
     const a = f.elements.check_in.value, b = f.elements.check_out.value;
     const n = a && b ? Math.round((new Date(b) - new Date(a)) / 864e5) : 0;
-    $("#stay").textContent = n > 0 ? `${fmtDate(a)} → ${fmtDate(b)} · ${n} night${n > 1 ? "s" : ""}` : "Choose your check-in and check-out dates.";
+    $("#stay").textContent = n > 0 ? `${fmtDate(a)} → ${fmtDate(b)} · ${nights(n)}` : t("search.choose_dates");
     const ps = n > 0 ? peakOverlap(a, b) : [];
     $("#peak").hidden = !ps.length; $("#peak").replaceChildren(...peakLines(ps));
   };
@@ -271,77 +566,151 @@ async function runSearch(q, quiet) {
   try {
     const r = await api("/api/public/search?" + new URLSearchParams(Object.entries(q).filter(([, v]) => v !== "")));
     S.result = r;
-    if (!r.properties.length) out.replaceChildren(note("", h("strong", null, "No rooms are available for these dates and guests."), h("p", { class: "muted" }, "Try different dates, fewer guests, or another property."), altButtons(r.alternatives || [])), ...(r.callback ? [callbackForm(r)] : []));
-    else out.replaceChildren(h("p", { class: "muted" }, `${r.nights} night${r.nights > 1 ? "s" : ""} · ${fmtDate(r.check_in)} to ${fmtDate(r.check_out)} · ${r.guests} guest${r.guests > 1 ? "s" : ""}`),
+    if (!r.properties.length) out.replaceChildren(note("", h("strong", null, t("results.none")), h("p", { class: "muted" }, t("results.none_hint")), altButtons(r.alternatives || [])), ...(r.waitlist ? [waitlistForm(r)] : []), ...(r.callback ? [callbackForm(r)] : []));
+    else out.replaceChildren(h("p", { class: "muted" }, `${nights(r.nights)} · ${t("results.dates", { from: fmtDate(r.check_in), to: fmtDate(r.check_out) })} · ${t("guests", { count: r.guests })}`),
       ...(r.peak.length ? [note("", ...peakLines(r.peak))] : []),
       ...groupByBuilding(r.properties).map(({ name, cards }) => h("section", { class: "bldg", "aria-label": name },
         h("h3", { class: "bldg-h" }, name),
-        h("ul", { class: "types" }, cards.map(({ p, t }) => h("li", null, roomCard(p, t, r)))))));
+        h("ul", { class: "types" }, cards.map(({ p, rt }) => h("li", null, roomCard(p, rt, r)))))));
     if (!quiet) { $("#res-h").focus(); $("#res-h").scrollIntoView({ block: "start" }); }
-  } catch (e) { out.replaceChildren(note("error", h("strong", null, "We couldn't check availability."), h("p", null, e.message), h("button", { class: "btn secondary small", type: "button", onclick: () => runSearch(q) }, "Try again"))); }
+  } catch (e) { out.replaceChildren(note("error", h("strong", null, t("results.error")), h("p", null, e.message), h("button", { class: "btn secondary small", type: "button", onclick: () => runSearch(q) }, t("results.retry")))); }
   finally { out.removeAttribute("aria-busy"); }
 }
 
-const shortDate = (s) => new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short" }).format(new Date(s + "T00:00:00"));
 function altButtons(alts) {  // nearby dates that are really free: a click fills the dates and searches again
   if (!alts.length) return null;
-  return h("div", { role: "group", "aria-label": "Nearby dates with rooms available", style: "margin-top:var(--s3)" },
-    h("p", null, "These nearby dates have rooms for your group:"),
-    h("div", { class: "actions" }, alts.map((a) => h("button", { class: "btn secondary small", type: "button", "aria-label": `Search again: ${a.nights} night${a.nights > 1 ? "s" : ""}, ${fmtDate(a.check_in)} to ${fmtDate(a.check_out)}`,
+  return h("div", { role: "group", "aria-label": t("alt.group"), style: "margin-top:var(--s3)" },
+    h("p", null, t("alt.intro")),
+    h("div", { class: "actions" }, alts.map((a) => h("button", { class: "btn secondary small", type: "button", "aria-label": t("alt.aria", { nights: nights(a.nights), from: fmtDate(a.check_in), to: fmtDate(a.check_out) }),
       onclick: () => { const f = $("#search"); f.elements.check_out.value = a.check_out; f.elements.check_in.value = a.check_in; f.elements.check_in.dispatchEvent(new Event("change")); f.dispatchEvent(new Event("input")); runSearch(Object.fromEntries(new FormData(f))); } },
-      `${a.nights} night${a.nights > 1 ? "s" : ""} free from ${shortDate(a.check_in)}`))));
+      t("alt.button", { nights: nights(a.nights), date: shortDate(a.check_in) })))));
 }
-// A big group, or nothing free and no dates to offer: ask the property to phone back
+// A big group, or nothing free and no dates to offer: ask the property to phone back (with the dates the guest wanted)
 function callbackForm(r) {
-  const err = h("p", { class: "msg error", role: "alert", hidden: true });
-  const field = (id, label, { tag = "input", ...p }, req) => h("div", null, h("label", { for: id, class: req ? "req" : null }, label), h(tag, { id, required: req, ...p }));
+  const err = h("p", { class: "msg error", role: "alert", hidden: true }), cap = h("div", { id: "cb_captcha" });
   const f = h("form", { class: "cb", "aria-labelledby": "cb-h" },
-    h("h3", { id: "cb-h" }, "Request a call-back"),
-    h("p", { class: "muted" }, (r.callback === "group" ? "Your group needs more rooms than can be booked online. " : "We have no rooms for these dates. ") + "Leave your details and the property will phone you."),
-    h("div", { class: "two" }, field("cb_name", "Your name", { name: "name", maxlength: 100, autocomplete: "name" }, true),
-      field("cb_phone", "Mobile number", { name: "phone", type: "tel", maxlength: 20, inputmode: "tel", autocomplete: "tel", pattern: "[+]?[0-9 \\-]{10,16}", title: "10 to 13 digits" }, true)),
-    h("div", { class: "two" }, field("cb_people", "Number of people", { name: "people", type: "number", min: 1, max: 500, inputmode: "numeric", value: r.guests }, true),
-      h("div")),
-    h("div", { class: "two" }, field("cb_in", "Preferred check-in", { name: "check_in", type: "date", min: S.info.today, value: r.check_in }, true),
-      field("cb_out", "Preferred check-out", { name: "check_out", type: "date", min: S.info.today, value: r.check_out }, true)),
-    field("cb_note", "Note (optional)", { tag: "textarea", name: "note", maxlength: 500, placeholder: "For example: elderly guests, need ground floor" }, false),
-    h("div", { inert: true, style: "position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden" }, h("label", { for: "cb_website" }, "Website (leave this empty)"), h("input", { id: "cb_website", name: "website", tabindex: "-1", autocomplete: "off" })),
-    err, h("div", null, h("button", { class: "btn", type: "submit" }, "Request a call-back")));
+    h("h3", { id: "cb-h" }, t("cb.title")),
+    h("p", { class: "muted" }, t(r.callback === "group" ? "cb.intro_group" : "cb.intro_none")),
+    h("div", { class: "two" }, field("cb_name", t("cb.name"), { name: "name", maxlength: 100, autocomplete: "name" }, true),
+      field("cb_phone", t("book.phone"), { name: "phone", type: "tel", maxlength: 20, inputmode: "tel", autocomplete: "tel", pattern: "[+]?[0-9 \\-]{10,16}", title: t("book.phone_title") }, true)),
+    h("div", { class: "two" }, field("cb_people", t("cb.people"), { name: "people", type: "number", min: 1, max: 500, inputmode: "numeric", value: r.guests }, true), h("div")),
+    h("div", { class: "two" }, field("cb_in", t("cb.in"), { name: "check_in", type: "date", min: S.info.today, value: r.check_in }, true),
+      field("cb_out", t("cb.out"), { name: "check_out", type: "date", min: S.info.today, value: r.check_out }, true)),
+    field("cb_note", t("cb.note"), { tag: "textarea", name: "note", maxlength: 500, placeholder: t("cb.note_ph") }, false),
+    honeypot("cb_website"), cap,
+    err, h("div", null, h("button", { class: "btn", type: "submit" }, t("cb.submit"))));
   f.addEventListener("submit", async (e) => {
     e.preventDefault(); err.hidden = true;
     const btn = $("button", f); btn.disabled = true;
     try {
       const v = Object.fromEntries(new FormData(f));
-      await api("/api/public/callback", { ...v, property_id: (S.search && S.search.property_id) || "" });
-      const done = h("div", { class: "msg", role: "status", tabindex: "-1" }, h("strong", null, "Thank you. We have your request."), h("p", null, `The property will phone you on ${v.phone}.`));
+      await api("/api/public/callback", { ...v, lang: I18N.lang, property_id: (S.search && S.search.property_id) || "", captcha_token: cb.token() });
+      const done = h("div", { class: "msg", role: "status", tabindex: "-1" }, h("strong", null, t("cb.thanks")), h("p", null, t("cb.phone_you", { phone: v.phone })));
       f.replaceWith(done); done.focus();
-    } catch (x) { err.textContent = x.message; err.hidden = false; btn.disabled = false; }
+    } catch (x) { err.textContent = x.message; err.hidden = false; btn.disabled = false; cb.reset(); }
   });
+  const cb = captchaBox(cap);
   return h("div", { class: "card", style: "padding:var(--s6);margin-top:var(--s4)" }, f);
 }
 
 const byName = (a, b) => a.localeCompare(b, undefined, { sensitivity: "base" });
 function groupByBuilding(props) {
   const m = new Map();
-  props.forEach((p) => p.types.forEach((t) => { const k = p.property.trim(); if (!m.has(k)) m.set(k, []); m.get(k).push({ p, t }); }));
-  return [...m].map(([name, cards]) => ({ name, cards: cards.sort((x, y) => byName(x.t.type, y.t.type)) })).sort((x, y) => byName(x.name, y.name));
+  props.forEach((p) => p.types.forEach((rt) => { const k = p.property.trim(); if (!m.has(k)) m.set(k, []); m.get(k).push({ p, rt }); }));
+  return [...m].map(([name, cards]) => ({ name, cards: cards.sort((x, y) => byName(x.rt.type, y.rt.type)) })).sort((x, y) => byName(x.name, y.name));
 }
 
-function roomCard(p, t, r) {
-  const isAC = /^ac\b/i.test(t.type.trim());
-  const chips = t.amenities.filter((a) => isAC || a.trim().toLowerCase() !== "ac");
+// ---------- availability calendar: colour AND symbol AND text per day, with the lowest nightly price ----------
+const SYM = { available: "●", few: "▲", soldout: "✕", closed: "–" };
+async function openCalendar(opener) {
+  const f = $("#search"), q = { property_id: f.elements.property_id.value, room_type_id: f.elements.room_type_id.value, senior: f.elements.senior?.checked ? "1" : "", ground_floor: f.elements.ground_floor?.checked ? "1" : "" };
+  let month = (f.elements.check_in.value || S.info.today).slice(0, 7), pick = null, data = null;
+  const status = h("p", { class: "muted", role: "status", "aria-live": "polite" }), grid = h("div", { class: "cal-grid" }), title = h("h3", { "aria-live": "polite" });
+  const prev = h("button", { class: "btn secondary small", type: "button", "aria-label": t("cal.prev") }, "‹"), next = h("button", { class: "btn secondary small", type: "button", "aria-label": t("cal.next") }, "›");
+  const legend = h("ul", { class: "cal-legend", "aria-label": t("cal.legend") }, [["available", "cal.available"], ["few", "cal.few"], ["soldout", "cal.soldout"], ["closed", "cal.closed"]].map(([k, key]) => h("li", null, h("i", { style: "--c:var(--" + ({ available: "success", few: "gold", soldout: "error", closed: "st-blocked" })[k] + ")" }), SYM[k] + " " + t(key))),
+    h("li", null, "★ " + t("cal.peak")));
+  const label = (d) => `${fmtDate(d.date)}: ${t("cal." + d.status)}${d.price != null ? ", " + inr.format(d.price) : ""}${d.peak ? ", " + d.peak : ""}`;
+  const free = (a, b) => data.days.filter((d) => d.date >= a && d.date < b).every((d) => d.status !== "soldout" && d.status !== "closed");  // nights between pick and the clicked day
+  function draw() {
+    title.textContent = new Intl.DateTimeFormat(LOC(), { month: "long", year: "numeric" }).format(new Date(data.month + "-01T00:00:00"));
+    prev.disabled = !data.prev; next.disabled = !data.next;
+    const wd = Array.from({ length: 7 }, (_, i) => h("div", { class: "wd", "aria-hidden": "true" }, new Intl.DateTimeFormat(LOC(), { weekday: "short" }).format(new Date(2024, 0, 1 + i))));
+    const blanks = Array.from({ length: data.weekday_of_first }, () => h("div"));
+    const days = data.days.map((d) => {
+      const dis = d.status === "closed" || (d.status === "soldout" && !pick);
+      return h("button", { type: "button", class: `cal-day ${d.status}${d.peak ? " peak" : ""}`, "aria-label": label(d), "aria-pressed": String(d.date === pick), disabled: d.status === "closed",
+        title: label(d), onclick: () => choose(d, dis) },
+        h("b", null, +d.date.slice(8)), h("small", { "aria-hidden": "true" }, SYM[d.status] + (d.peak ? "★" : "")), d.price != null ? h("small", { "aria-hidden": "true" }, "₹" + d.price) : null);
+    });
+    grid.replaceChildren(...wd, ...blanks, ...days);
+    status.textContent = pick ? t("cal.pick_out", { date: fmtDate(pick) }) : t("cal.pick_in");
+  }
+  function choose(d, dis) {
+    if (!pick || d.date <= pick) {
+      if (d.status === "soldout") { status.textContent = t("cal.soldout_in"); return; }
+      pick = d.date; draw(); return;
+    }
+    if (!free(pick, d.date)) { status.textContent = t("cal.gap"); return; }
+    f.elements.check_in.value = pick; f.elements.check_out.value = d.date;
+    f.elements.check_in.dispatchEvent(new Event("change")); f.dispatchEvent(new Event("input"));
+    $("#gdlg").close(); runSearch(Object.fromEntries(new FormData(f)));
+  }
+  async function load(m) {
+    grid.setAttribute("aria-busy", "true");
+    try { data = await api("/api/public/calendar?" + new URLSearchParams(Object.entries({ ...q, month: m }).filter(([, v]) => v !== ""))); month = data.month; draw(); }
+    catch (x) { status.textContent = x.message; }
+    finally { grid.removeAttribute("aria-busy"); }
+  }
+  prev.onclick = () => load(data.prev); next.onclick = () => load(data.next);
+  openDialog({ title: t("cal.title"), opener, body: [h("div", { class: "cal-nav" }, prev, title, next), status, grid, legend, h("p", { class: "hint" }, t("cal.note"))] });
+  load(month);
+}
+
+// ---------- nothing free: "notify me" when a room frees up ----------
+function waitlistForm(r) {
+  const err = h("p", { class: "msg error", role: "alert", hidden: true }), cap = h("div", { id: "wl_captcha" });
+  const f = h("form", { class: "cb", "aria-labelledby": "wl-h" },
+    h("h3", { id: "wl-h" }, t("wl.title")), h("p", { class: "muted" }, t("wl.intro")),
+    h("div", { class: "two" }, field("wl_name", t("cb.name"), { name: "name", maxlength: 100, autocomplete: "name" }, true),
+      field("wl_phone", t("book.phone"), { name: "phone", type: "tel", maxlength: 20, inputmode: "tel", autocomplete: "tel", pattern: "[+]?[0-9 \\-]{10,16}", title: t("book.phone_title") }, true)),
+    field("wl_email", t("book.email"), { name: "email", type: "email", maxlength: 120, autocomplete: "email" }, false),
+    honeypot("wl_website"), cap, err, h("div", null, h("button", { class: "btn", type: "submit" }, t("wl.submit"))));
+  const box = h("div", { class: "card", style: "padding:var(--s6);margin-top:var(--s4)" }, f), cb = captchaBox(cap);
+  f.addEventListener("submit", async (e) => {
+    e.preventDefault(); err.hidden = true;
+    const btn = $("button[type=submit]", f); btn.disabled = true;
+    try {
+      const v = Object.fromEntries(new FormData(f)), s = S.search || {};
+      await api("/api/public/waitlist", { ...v, check_in: r.check_in, check_out: r.check_out, guests: r.guests, property_id: s.property_id || "", room_type_id: s.room_type_id || "", ...filterParams(), lang: I18N.lang, captcha_token: cb.token() });
+      const done = h("div", { class: "msg", role: "status", tabindex: "-1" }, h("strong", null, t("wl.thanks")), h("p", null, t("wl.thanks_text", { phone: v.phone })));
+      f.replaceWith(done); done.focus();
+    } catch (x) { err.textContent = x.message; err.hidden = false; btn.disabled = false; cb.reset(); }
+  });
+  return box;
+}
+
+function roomCard(p, rt, r) {
+  const isAC = /^ac\b/i.test(rt.type.trim()), pr = S.info.pricing || {};
+  const chips = rt.amenities.filter((a) => isAC || a.trim().toLowerCase() !== "ac");
+  const tags = [rt.ground_floor && t("room.ground"), rt.senior_friendly && t("room.senior")].filter(Boolean);
   return h("article", { class: "card rt" },
-    h("div", { style: "display:flex;justify-content:space-between;gap:.5rem;align-items:start" }, h("h4", null, t.type), h("span", { class: "badge s-available" }, t.few_left ? "Available · few left" : "Available")),
-    h("p", { class: "small muted" }, `Sleeps ${t.capacity}${t.description ? " · " + t.description : ""}`),
-    chips.length ? h("ul", { class: "chips", "aria-label": "Amenities" }, chips.map((a) => h("li", null, a))) : null,
-    t.rooms_needed > 1 ? h("p", { class: "small" }, `For ${r.guests} guests you need ${t.rooms_needed} rooms of this type.`) : null,
-    h("div", { class: "foot" }, h("div", null, h("div", { class: "price" }, inr.format(t.tariff), h("span", { class: "small muted", style: "font:400 .85rem var(--font-sans)" }, " per room per night")),
-      h("div", { class: "small muted" }, `${inr.format(t.total_per_room)} for ${t.nights} night${t.nights > 1 ? "s" : ""}`)),
-      h("button", { class: "btn", type: "button", "aria-label": `Book ${t.type} at ${p.property}`, onclick: (e) => openBook(p, t, r, e.currentTarget) }, "Book this room")));
+    rt.photo ? h("img", { class: "rtphoto", src: "/uploads/" + rt.photo, alt: t("room.photo_alt", { type: rt.type, property: p.property }), loading: "lazy", width: 640, height: 400 })
+      : h("div", { class: "rtphoto none", role: "img", "aria-label": t("room.photo_alt", { type: rt.type, property: p.property }) }, h("span", { "aria-hidden": "true" }, "🛏")),
+    h("div", { style: "display:flex;justify-content:space-between;gap:.5rem;align-items:start" }, h("h4", null, rt.type), h("span", { class: "badge s-available" }, t(rt.few_left ? "room.few_left" : "room.available"))),
+    h("p", { class: "small muted" }, t("room.sleeps", { n: rt.capacity }) + (rt.description ? " · " + rt.description : "")),
+    tags.length ? h("ul", { class: "tags", "aria-label": t("room.features") }, tags.map((x) => h("li", null, x))) : null,
+    chips.length ? h("ul", { class: "chips", "aria-label": t("room.amenities") }, chips.map((a) => h("li", null, a))) : null,
+    rt.rooms_needed > 1 ? h("p", { class: "small" }, t("room.need", { guests: r.guests, rooms: rt.rooms_needed })) : null,
+    h("div", { class: "foot" }, h("div", null, h("div", { class: "price" }, inr.format(rt.tariff), h("span", { class: "small muted pernight" }, " " + t("room.per_night"))),
+      h("div", { class: "small muted" }, t("room.total", { total: inr.format(rt.total_per_room), nights: nights(rt.nights) }) + (pr.tax_percent ? " · " + t("room.plus_tax", { percent: pr.tax_percent }) : "")),
+      rt.peak_prices ? h("div", { class: "small muted" }, "★ " + t("room.peak_prices")) : null),
+      h("button", { class: "btn", type: "button", "aria-label": `${t("room.book")}: ${rt.type}, ${p.property}`, onclick: (e) => openBook(p, rt, r, e.currentTarget) }, t("room.book"))));
 }
 
 // ---------- booking dialog ----------
 let bctx = null;
+const OTP = { proof: null, phone: null, timer: null };
+const digitsOnly = (v) => String(v).replace(/\D/g, "");
 // ---------- room hold: the chosen rooms are reserved for 10 minutes while the guest fills in the form ----------
 const HOLD = { token: null, until: 0, timer: null, warned: false };
 const mmss = (ms) => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
@@ -351,97 +720,289 @@ function stopHold(release) {
   HOLD.token = HOLD.timer = null;
 }
 async function takeHold() {
-  const { p, t, r } = bctx;
-  const d = await api("/api/public/hold", { property_id: p.property_id, room_type_id: t.room_type_id, check_in: r.check_in, check_out: r.check_out, rooms: +$("#b_rooms").value || 1, token: HOLD.token });
+  const { p, rt, r } = bctx;
+  const d = await api("/api/public/hold", { property_id: p.property_id, room_type_id: rt.room_type_id, check_in: r.check_in, check_out: r.check_out, rooms: +$("#b_rooms").value || 1, token: HOLD.token, ...filterParams() });
   clearInterval(HOLD.timer);
   HOLD.token = d.token; HOLD.until = Date.now() + d.seconds * 1000; HOLD.warned = false;
   const tick = () => {
     const left = HOLD.until - Date.now();
     if (left <= 0) {
       clearInterval(HOLD.timer); HOLD.token = null;
-      $("#b_hold").textContent = "Your 10-minute hold has ended. You can still confirm: we will check the rooms are free.";
-      $("#b_holdlive").textContent = "Your room hold has ended."; return;
+      $("#b_hold").textContent = t("hold.ended");
+      $("#b_holdlive").textContent = t("hold.ended_live"); return;
     }
-    $("#b_hold").textContent = `These rooms are held for you for ${mmss(left)}.`;
-    if (left <= 120000 && !HOLD.warned) { HOLD.warned = true; $("#b_holdlive").textContent = "Your room hold ends in 2 minutes."; }
+    $("#b_hold").textContent = t("hold.left", { time: mmss(left) });
+    if (left <= 120000 && !HOLD.warned) { HOLD.warned = true; $("#b_holdlive").textContent = t("hold.warn"); }
   };
-  $("#b_holdlive").textContent = "Rooms are held for you for 10 minutes.";
+  $("#b_holdlive").textContent = t("hold.start");
   tick(); HOLD.timer = setInterval(tick, 1000);
 }
 window.addEventListener("pagehide", () => { if (HOLD.token) navigator.sendBeacon("/api/public/release", new Blob([JSON.stringify({ token: HOLD.token })], { type: "application/json" })); });
 
-async function openBook(p, t, r, opener) {
-  bctx = { p, t, r, opener };
+const syncSubmit = () => {
+  const need = !!S.info.otp_required && !OTP.proof;
+  $("#b_submit").disabled = need; $("#b_otp_hint").hidden = !need;
+};
+function resetOtp() {
+  OTP.proof = OTP.phone = null; clearInterval(OTP.timer);
+  $("#b_otp_box").hidden = true; $("#b_otp_status").textContent = ""; $("#b_otp_status").className = "hint"; $("#b_code").value = "";
+  $("#b_sendotp").disabled = false; $("#b_sendotp").textContent = t("otp.send");
+  syncSubmit();
+}
+
+async function openBook(p, rt, r, opener) {
+  bctx = { p, rt, r, opener, n: 1, quote: null };
   const rooms = $("#b_rooms");
-  rooms.replaceChildren(...Array.from({ length: t.can_book }, (_, i) => h("option", { value: i + 1, selected: i + 1 === Math.min(t.rooms_needed, t.can_book) }, i + 1)));
+  rooms.replaceChildren(...Array.from({ length: rt.can_book }, (_, i) => h("option", { value: i + 1, selected: i + 1 === Math.min(rt.rooms_needed, rt.can_book) }, i + 1)));
   bctx.n = +rooms.value;
   opener.disabled = true;
   try { await takeHold(); }
-  catch (x) { toast(x.message); if (/no longer available/i.test(x.message)) runSearch(S.search, true); return; }
+  catch (x) { toast(x.message); if (/no longer available/i.test(x.raw)) runSearch(S.search, true); return; }
   finally { opener.disabled = false; }
-  $("#b_idtype").replaceChildren(...ID_TYPES.map((x) => h("option", { value: x }, x)));
-  $("#b_guests").value = r.guests; $("#b_err").hidden = true; $("#b_darshan").min = S.info.today;
+  const keep = +rooms.value, pr = S.info.pricing || {};
+  $("#bform").reset(); rooms.value = keep;
+  $("#b_idtype").replaceChildren(...ID_TYPES.map(([v, k]) => h("option", { value: v }, t(k))));
+  $("#b_guests").value = r.guests; $("#b_err").hidden = true; $("#b_darshan").min = S.info.today; $("#b_more").open = false;
+  $("#b_beds_wrap").hidden = !(pr.extra_bed_price != null && pr.extra_bed_max > 0); $("#b_beds").replaceChildren();
+  $("#b_other_box").hidden = true; $("#b_promo_msg").hidden = true;
+  $("#b_sendotp").hidden = !S.info.otp_required; $("#b_otp_hint").hidden = !S.info.otp_required;
+  bctx.cap = captchaBox($("#b_captcha")); resetOtp();
   $("#b_peak").hidden = !r.peak.length; $("#b_peak").replaceChildren(...peakLines(r.peak));
+  $("#b_official").replaceChildren(...officialNotice().flat());
+  $("#b_policy").replaceChildren(h("strong", null, t("policy.summary")), h("ul", { class: "plain" }, policyLines(r.check_in).map((l) => h("li", null, l))), h("a", { href: "#/policy", target: "_blank", rel: "noopener" }, t("book.policy_link")));
+  $("#b_price").replaceChildren(loading()); $("#b_pay_opts").replaceChildren(); payOptions(); buildSevas();
   updateSummary(); $("#bdlg").showModal();
 }
 function updateSummary() {
-  const { p, t, r } = bctx, n = +$("#b_rooms").value || 1, st = S.info.settings;
-  $("#b_guests").min = n; $("#b_guests").max = n * t.capacity;
-  $("#b_hint").textContent = `${n} room${n > 1 ? "s" : ""} of ${t.type} sleep${n > 1 ? "" : "s"} up to ${n * t.capacity} guests in total.`;
-  $("#bsum").replaceChildren(...dl([["Property", p.property], ["Room type", t.type], ["Check-in", `${fmtDate(r.check_in)}, from ${fmtTime(st.checkin_time)}`],
-    ["Check-out", `${fmtDate(r.check_out)}, by ${fmtTime(st.checkout_time)}`], ["Nights", r.nights], ["Rooms", `${n} × ${inr.format(t.tariff)} per night`],
-    $("#b_arrive").value ? ["Expected arrival", fmtTime($("#b_arrive").value)] : null, $("#b_darshan").value ? ["Darshan date", fmtDate($("#b_darshan").value)] : null,
-    ["Total amount", inr.format(n * t.total_per_room), "total"]]).children);
+  const { p, rt, r } = bctx, n = +$("#b_rooms").value || 1, st = S.info.settings, pr = S.info.pricing || {};
+  const maxBeds = pr.extra_bed_price != null ? n * (pr.extra_bed_max || 0) : 0, beds = $("#b_beds");
+  if (beds.options.length !== maxBeds + 1) beds.replaceChildren(...Array.from({ length: maxBeds + 1 }, (_, i) => h("option", { value: i }, i)));
+  const cap = n * rt.capacity + (+beds.value || 0) + (pr.child_counts_capacity === false ? +$("#b_children").value || 0 : 0);
+  $("#b_guests").min = n; $("#b_guests").max = cap; $("#b_children").max = +$("#b_guests").value || 0;
+  $("#b_hint").textContent = t("book.hint", { count: n, type: rt.type, max: cap });
+  $("#bsum").replaceChildren(...dl([[t("sum.property"), p.property], [t("sum.type"), rt.type], [t("sum.in"), t("sum.from", { date: fmtDate(r.check_in), time: fmtTime(st.checkin_time) })],
+    [t("sum.out"), t("sum.by", { date: fmtDate(r.check_out), time: fmtTime(st.checkout_time) })], [t("sum.nights"), r.nights],
+    $("#b_arrive").value ? [t("sum.arrival"), fmtTime($("#b_arrive").value)] : null, $("#b_darshan").value ? [t("sum.darshan"), fmtDate($("#b_darshan").value)] : null]).children);
+  queueQuote();
 }
-$("#b_arrive").addEventListener("input", () => bctx && updateSummary());
-$("#b_darshan").addEventListener("input", () => bctx && updateSummary());
+// ---------- payment: pay in full, an advance, or at the counter (online options only when the server reports a provider) ----------
+const PAYCFG = () => (S.info && S.info.payments) || { enabled: false, options: ["counter"] };
+const PAYVALUE = { full: "pay_full", advance: "pay_advance", counter: "pay_at_counter" };
+function payOptions() {
+  const cfg = PAYCFG(), box = $("#b_pay"), q = bctx && bctx.quote;
+  box.hidden = !cfg.enabled; $("#b_secure").hidden = !cfg.secure_badge; $("#b_testmode").hidden = !cfg.test_mode;  // the secure-payment badge only exists when online payment is on
+  if (!cfg.enabled) return;
+  const keep = (document.querySelector("input[name=pay_choice]:checked") || {}).value || (cfg.options[0] === "counter" ? "counter" : cfg.options[0]);
+  const money = (v) => (q ? inr.format(v) : "…");
+  const line = (key, label, note) => h("label", { class: "opt" }, h("input", { type: "radio", name: "pay_choice", value: key, checked: key === keep || (!cfg.options.includes(keep) && key === cfg.options[0]), onchange: syncPayButton }),
+    h("span", null, label, note ? h("span", { class: "hint", style: "display:block" }, note) : null));
+  $("#b_pay_opts").replaceChildren(...cfg.options.map((o) => o === "full" ? line(o, t("pay.full", { amount: money(q ? q.total : 0) }))
+    : o === "advance" ? line(o, t("pay.advance", { amount: money(q ? q.advance : 0), percent: cfg.advance_percent }), q ? t("pay.advance_note", { amount: money(q.balance) }) : null)
+    : line(o, t("pay.counter"), t("pay.counter_note"))));
+  syncPayButton();
+}
+function syncPayButton() {
+  const cfg = PAYCFG(), pick = (document.querySelector("input[name=pay_choice]:checked") || {}).value || "counter", q = bctx && bctx.quote;
+  $("#b_submit").textContent = cfg.enabled && pick !== "counter" && q ? t("pay.cta", { amount: inr.format(pick === "full" ? q.total : q.advance) }) : t("book.submit");
+}
+let payScript = null;
+const loadCheckout = () => (payScript ||= new Promise((ok, no) => { const el = h("script", { src: "https://checkout.razorpay.com/v1/checkout.js", async: true }); el.onload = ok; el.onerror = () => { payScript = null; no(); }; document.head.append(el); }));
+async function finishPayment(pay, ids, phone) {  // the provider (or the test window) reported a payment: the server verifies it and creates the booking
+  const note = $("#b_err"); note.textContent = t("pay.confirming"); note.className = "msg"; note.hidden = false;
+  let b;
+  try { b = await api("/api/public/payment/verify", ids); }
+  catch (x) {  // the webhook may have booked it already: look a few times before giving up
+    for (let i = 0; i < 5 && !b; i++) {
+      await new Promise((r) => setTimeout(r, 1500));
+      try { const st = await api("/api/public/payment/status?order_id=" + encodeURIComponent(pay.order_id)); if (st.status === "paid") b = await api("/api/public/booking/lookup", { booking_id: st.booking_id, phone }); } catch {}
+    }
+    if (!b) throw x;
+  }
+  return b;
+}
+function checkoutMock(pay, phone) {  // stands in for the provider's window when PAYMENT_PROVIDER=mock (local testing only)
+  return new Promise((done, fail) => {
+    const sel = h("select", { id: "mk_m" }, ["upi", "card", "netbanking"].map((m) => h("option", { value: m }, { upi: t("pay.upi"), card: t("pay.card"), netbanking: t("pay.netbanking") }[m])));
+    const err = h("p", { class: "msg error", role: "alert", hidden: true });
+    const dlg = h("dialog", { "aria-labelledby": "mk_h" }, h("form", { method: "dialog", onsubmit: (e) => e.preventDefault() }, h("h2", { id: "mk_h" }, t("pay.mock_title")), h("p", { class: "muted" }, t("pay.mock_text")), h("p", null, h("strong", null, inr.format(pay.amount))),
+      h("div", null, h("label", { for: "mk_m" }, t("pay.mock_method")), sel), err,
+      h("div", { class: "foot" }, h("button", { class: "btn secondary", type: "button", onclick: () => { dlg.close(); fail(Object.assign(new Error("dismissed"), { dismissed: true })); } }, t("pay.mock_close")),
+        h("button", { class: "btn danger", type: "button", onclick: async () => { try { await api("/api/public/payment/mock", { order_id: pay.order_id, outcome: "fail" }); } catch (x) { err.textContent = x.message; err.hidden = false; } } }, t("pay.mock_fail")),
+        h("button", { class: "btn", id: "mk_pay", type: "button", onclick: async () => { try { const r = await api("/api/public/payment/mock", { order_id: pay.order_id, outcome: "success", method: sel.value }); dlg.close(); done(r); } catch (x) { err.textContent = x.message; err.hidden = false; } } }, t("pay.mock_pay", { amount: inr.format(pay.amount) })))));
+    dlg.addEventListener("close", () => dlg.remove()); document.body.append(dlg); dlg.showModal();
+  });
+}
+async function runCheckout(pay, phone) {
+  const note = $("#b_err"); note.textContent = t("pay.opening"); note.className = "msg"; note.hidden = false;
+  let paid;
+  try {
+    if (pay.mock) paid = await checkoutMock(pay, phone);
+    else {
+      await loadCheckout();
+      paid = await new Promise((done, fail) => {
+        const rz = new Razorpay({ key: pay.key_id, amount: pay.amount_paise, currency: pay.currency, order_id: pay.order_id, name: pay.name, description: pay.description, prefill: pay.prefill,
+          method: { upi: true, card: true, netbanking: true, wallet: false, emi: false, paylater: false }, theme: { color: "#B8860B" },
+          handler: (r) => done({ order_id: r.razorpay_order_id, payment_id: r.razorpay_payment_id, signature: r.razorpay_signature }),
+          modal: { ondismiss: () => fail(Object.assign(new Error("dismissed"), { dismissed: true })) } });
+        rz.on("payment.failed", (r) => { note.textContent = t("pay.failed_retry", { reason: (r.error && r.error.description) || "" }); note.className = "msg error"; });
+        rz.open();
+      });
+    }
+  } catch (x) {
+    if (x.dismissed) { api("/api/public/payment/cancel", { order_id: pay.order_id }).catch(() => {}); stopHold(false); HOLD.token = null; resetOtp(); note.textContent = t("pay.dismissed"); note.className = "msg error"; note.hidden = false; return null; }
+    throw x;
+  }
+  return finishPayment(pay, paid, phone);
+}
+// The price comes from the server (the same code that prices the booking), shortly after the last change
+let qTimer = null;
+function queueQuote() { clearTimeout(qTimer); $("#b_price").setAttribute("aria-busy", "true"); qTimer = setTimeout(quoteNow, 350); }
+async function quoteNow() {
+  if (!bctx) return;
+  const { p, rt, r } = bctx, code = $("#b_promo").value.trim(), msg = $("#b_promo_msg");
+  const base = { property_id: p.property_id, room_type_id: rt.room_type_id, check_in: r.check_in, check_out: r.check_out, rooms: +$("#b_rooms").value || 1, guests: +$("#b_guests").value || 1,
+    children: +$("#b_children").value || 0, extra_beds: +$("#b_beds").value || 0, phone: $("#b_phone").value, sevas: sevaPick(), package_id: packagePick(), ...filterParams() };
+  msg.hidden = true;
+  try {
+    let q;
+    try { q = await api("/api/public/quote", { ...base, promo_code: code }); }
+    catch (x) { if (!code || !/code/i.test(x.raw)) throw x; msg.textContent = x.message; msg.className = "hint bad"; msg.hidden = false; q = await api("/api/public/quote", base); }  // a bad code never blocks the price
+    if (!bctx) return;
+    bctx.quote = q; $("#b_price").replaceChildren(...priceBox(q).childNodes); payOptions();
+    if (code && q.discount) { msg.textContent = t("promo.applied", { name: q.discount.code || q.discount.label }); msg.className = "hint okay"; msg.hidden = false; }
+    else if (q.discount) { msg.textContent = t("promo.auto", { name: q.discount.label }); msg.className = "hint okay"; msg.hidden = false; }
+  } catch (x) { $("#b_price").replaceChildren(h("p", { class: "bad" }, x.message)); }
+  finally { $("#b_price").removeAttribute("aria-busy"); }
+}
+["#b_arrive", "#b_darshan"].forEach((s) => $(s).addEventListener("input", () => bctx && updateSummary()));
+["#b_guests", "#b_children", "#b_beds"].forEach((s) => $(s).addEventListener("input", () => bctx && updateSummary()));
+$("#b_beds").addEventListener("change", () => bctx && updateSummary());
+$("#b_applypromo").onclick = () => bctx && quoteNow();
+$("#b_promo").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); quoteNow(); } });
+$("#b_other").addEventListener("change", () => { $("#b_other_box").hidden = !$("#b_other").checked; $("#b_booker").required = $("#b_other").checked; });
 $("#b_rooms").addEventListener("change", async () => {
   updateSummary();
   try { await takeHold(); $("#b_err").hidden = true; bctx.n = +$("#b_rooms").value; }
   catch (x) { $("#b_err").textContent = x.message; $("#b_err").hidden = false; $("#b_rooms").value = bctx.n; updateSummary(); }  // the earlier hold is kept
 });
+// phone OTP: the code is sent by SMS; the server gives back a one-use proof that the booking needs
+$("#b_phone").addEventListener("input", () => {
+  if (!bctx) return;
+  if (OTP.proof && digitsOnly($("#b_phone").value).slice(-10) !== OTP.phone) resetOtp();
+});
+$("#b_phone").addEventListener("change", () => bctx && queueQuote());
+$("#b_sendotp").onclick = async () => {
+  const ph = $("#b_phone"), btn = $("#b_sendotp"), err = $("#b_err");
+  if (!ph.reportValidity()) return;
+  btn.disabled = true; err.hidden = true;
+  try {
+    const r = await api("/api/public/otp/send", { phone: ph.value, purpose: "booking", lang: I18N.lang, captcha_token: bctx.cap.token() });
+    $("#b_otp_box").hidden = false; $("#b_code").focus(); $("#b_otp_status").textContent = t("otp.sent", { phone: ph.value });
+    let left = r.resend_after; clearInterval(OTP.timer);
+    const tick = () => { if (left > 0) { btn.textContent = t("otp.resend_in", { n: left }); left--; } else { clearInterval(OTP.timer); btn.disabled = false; btn.textContent = t("otp.resend"); } };
+    tick(); OTP.timer = setInterval(tick, 1000);
+  } catch (x) { err.textContent = x.message; err.hidden = false; btn.disabled = false; bctx.cap.reset(); }
+};
+$("#b_code").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("#b_verify").click(); } });
+$("#b_verify").onclick = async () => {
+  const err = $("#b_err"), btn = $("#b_verify");
+  err.hidden = true; btn.disabled = true;
+  try {
+    const r = await api("/api/public/otp/verify", { phone: $("#b_phone").value, purpose: "booking", code: $("#b_code").value });
+    OTP.proof = r.proof; OTP.phone = digitsOnly($("#b_phone").value).slice(-10); clearInterval(OTP.timer);
+    $("#b_otp_box").hidden = true; $("#b_sendotp").textContent = t("otp.verified_btn"); $("#b_sendotp").disabled = true;
+    $("#b_otp_status").textContent = t("otp.verified"); $("#b_otp_status").className = "hint okay";
+    const pf = r.profile;  // details the visitor chose to save on an earlier stay
+    if (pf) {
+      if (!$("#b_name").value && pf.name) $("#b_name").value = pf.name;
+      if (!$("#b_email").value && pf.email) $("#b_email").value = pf.email;
+      if (pf.id_type && ID_TYPES.some(([v]) => v === pf.id_type)) $("#b_idtype").value = pf.id_type;
+      $("#b_otp_status").textContent = t("otp.verified") + " " + t("otp.welcome_back"); $("#b_save").checked = true;
+    }
+    syncSubmit();
+  } catch (x) { err.textContent = x.message; err.hidden = false; }
+  finally { btn.disabled = false; }
+};
 $("#b_back").onclick = () => $("#bdlg").close();
-$("#bdlg").addEventListener("close", () => { stopHold(true); if (bctx?.opener?.isConnected) bctx.opener.focus(); });
+$("#bdlg").addEventListener("close", () => { stopHold(true); clearInterval(OTP.timer); if (bctx?.opener?.isConnected) bctx.opener.focus(); });
 $("#bform").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const { p, t, r } = bctx, btn = $("#b_submit"), err = $("#b_err");
-  err.hidden = true; btn.disabled = true; btn.textContent = "Booking…";
+  const { p, rt, r } = bctx, btn = $("#b_submit"), err = $("#b_err");
+  err.hidden = true; btn.disabled = true; btn.textContent = t("book.submitting");
   const v = Object.fromEntries(new FormData($("#bform")));
+  const body = { guest_name: v.guest_name, phone: v.phone, id_type: v.id_type, id_number: v.id_number, email: v.email, arrival_time: v.arrival_time, darshan_date: v.darshan_date, remarks: v.remarks,
+    website: v.website, rooms: v.rooms, guests: v.guests, children: +v.children || 0, extra_beds: +v.extra_beds || 0, promo_code: v.promo_code, otp_proof: OTP.proof || "", save_details: !!v.save_details,
+    captcha_token: bctx.cap.token(), lang: I18N.lang, sevas: sevaPick(), package_id: packagePick(), ...filterParams(), ...(v.for_other ? { booker_name: v.booker_name, arrival_contact_name: v.arrival_contact_name, arrival_contact_phone: v.arrival_contact_phone } : {}) };
   try {
-    const b = await api("/api/public/book", { ...v, property_id: p.property_id, room_type_id: t.room_type_id, check_in: r.check_in, check_out: r.check_out, payment_method: "pay_at_counter", hold_token: HOLD.token });
+    const pick = PAYCFG().enabled ? (document.querySelector("input[name=pay_choice]:checked") || {}).value || "counter" : "counter";
+    let b = await api("/api/public/book", { ...body, property_id: p.property_id, room_type_id: rt.room_type_id, check_in: r.check_in, check_out: r.check_out, payment_method: PAYVALUE[pick], hold_token: HOLD.token });
+    if (b.payment_required) { b = await runCheckout(b.payment, v.phone); if (!b) return; }  // null: the guest closed the payment window
     S.last = b; try { sessionStorage.setItem("last", JSON.stringify({ id: b.booking_id, phone: v.phone })); } catch {}
+    saveRebook({ property_id: p.property_id, room_type_id: rt.room_type_id, guests: +v.guests || 2, rooms: +v.rooms || 1, nights: r.nights });
     stopHold(false); bctx.opener = null; $("#bdlg").close(); $("#bform").reset(); location.hash = "#/confirmed";
   } catch (x) {
-    err.textContent = x.message; err.hidden = false; err.scrollIntoView({ block: "nearest" });
-    if (/no longer available/i.test(x.message)) runSearch(S.search, true);
-  } finally { btn.disabled = false; btn.textContent = "Confirm booking"; }
+    err.textContent = x.message; err.className = "msg error"; err.hidden = false; err.scrollIntoView({ block: "nearest" });
+    if (/no longer available/i.test(x.raw)) runSearch(S.search, true);
+    if (/verify your mobile/i.test(x.raw)) { OTP.proof = null; syncSubmit(); }
+  } finally { syncPayButton(); syncSubmit(); }
 });
 
-// ---------- booking details (confirmation + My Booking) ----------
-function bookingCard(b, confirmed) {
+// ---------- booking details (confirmation + My Booking + My bookings) ----------
+// mode "lookup": booking ID + mobile (public endpoints); mode "account": signed in with an SMS code (/api/me endpoints, no mobile needed)
+const bphone = (b) => S.lookup?.phone || JSON.parse(sessionStorage.getItem("last") || "{}").phone || b.mobile;
+const bapi = (mode, action, b, extra) => (mode === "account" ? api(`/api/me/booking/${action}`, { booking_id: b.booking_id, ...extra }) : api(`/api/public/booking/${action}`, { booking_id: b.booking_id, phone: bphone(b), ...extra }));
+function refundLine(b) {  // where the refund of a cancelled, paid booking stands
+  const a = { amount: inr.format(b.payment.refunded + b.payment.refund_in_progress) };
+  return { pending: t("refund.pending", a), processed: t("refund.processed", a), manual: t("refund.manual", a), failed: t("refund.failed", a) }[b.payment.refund_status];
+}
+async function downloadPdf(b, mode) {  // the PDF needs the booking ID and mobile number (or the signed-in session), so it is fetched and saved from here
+  try {
+    const res = mode === "account" ? await fetch(`/api/me/receipt.pdf?booking_id=${b.booking_id}`)
+      : await fetch("/api/public/booking/receipt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ booking_id: b.booking_id, phone: bphone(b) }) });
+    if (!res.ok) throw new Error();
+    const url = URL.createObjectURL(await res.blob()), a = h("a", { href: url, download: `booking-${b.booking_id}.pdf` });
+    document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 10000);
+  } catch { toast(t("err.generic")); }
+}
+function bookingCard(b, confirmed, mode = "lookup", reload) {
   const p = b.property, cancelled = b.status === "Cancelled";
   const statusClass = { Confirmed: "booked", "Checked-In": "occupied" }[b.status] || "neutral";
-  return h("article", { class: "card conf" + (cancelled ? " cancelled" : ""), "aria-label": "Booking details" },
-    confirmed ? h("div", null, h("p", { class: "eyebrow", style: "color:var(--success)" }, "Booking confirmed"), h("p", null, "Thank you. Please keep your booking ID and mobile number: you need both to view or cancel this booking.")) : null,
-    h("div", null, h("div", { class: "small muted" }, "Booking ID"), h("div", { class: "id" }, "#" + b.booking_id), h("span", { class: "badge s-" + statusClass }, b.status)),
+  const swap = (nb) => { if (mode === "account") return reload && reload(); const box = $("#view article")?.parentElement; if (box) box.replaceChildren(bookingCard(nb, false, mode)); };
+  return h("article", { class: "card conf" + (cancelled ? " cancelled" : ""), "aria-label": t("conf.aria") },
+    confirmed ? h("div", null, h("p", { class: "eyebrow", style: "color:var(--success)" }, t("conf.done")), h("p", null, t("conf.keep"))) : null,
+    (b.notices || []).length ? h("div", { class: "msg nbox " + (b.notices.some((n) => n.level === "warning") ? "warning" : ""), role: "note" }, h("strong", null, t("notice.heading")), h("ul", { class: "plain" }, b.notices.map((n) => h("li", null, h("strong", null, noticeKind(n.kind) + ": "), n.text)))) : null,
+    h("div", null, h("div", { class: "small muted" }, t("conf.id")), h("div", { class: "id" }, "#" + b.booking_id), h("span", { class: "badge s-" + statusClass }, statusLabel(b.status))),
     h("div", { class: "grid2" },
-      h("div", null, h("h3", null, "Your stay"), dl([["Property", p.name], ["Room type", `${b.room_type}${b.rooms > 1 ? " × " + b.rooms : ""}`], ["Guests", b.guests], ["Check-in", `${fmtDate(b.check_in)}, from ${fmtTime(b.check_in_time)}`],
-        ["Check-out", `${fmtDate(b.check_out)}, by ${fmtTime(b.check_out_time)}`], ["Nights", b.nights], ["Guest name", b.guest_name], ["Mobile", b.mobile], b.arrival_time ? ["Expected arrival", fmtTime(b.arrival_time)] : null,
-        b.darshan_date ? ["Darshan date", fmtDate(b.darshan_date)] : null, b.special_requests ? ["Requests", b.special_requests] : null])),
-      h("div", null, h("h3", null, "Amount and payment"), dl([["Total amount", inr.format(b.amount), "total"], ["Payment", b.payment.method]]),
-        h("h3", { style: "margin-top:1rem" }, "Property contact"), h("p", null, h("strong", null, p.name)),
+      h("div", null, h("h3", null, t("conf.stay")), dl([[t("sum.property"), p.name], [t("sum.type"), `${b.room_type}${b.rooms > 1 ? " × " + b.rooms : ""}`], [t("conf.guests"), b.guests + (b.children ? ` (${t("conf.children", { count: b.children })})` : "")],
+        b.extra_beds ? [t("conf.beds"), b.extra_beds] : null, [t("sum.in"), t("sum.from", { date: fmtDate(b.check_in), time: fmtTime(b.check_in_time) })],
+        [t("sum.out"), t("sum.by", { date: fmtDate(b.check_out), time: fmtTime(b.check_out_time) })], [t("sum.nights"), b.nights], [t("conf.name"), b.guest_name],
+        b.booker_name ? [t("conf.booker"), b.booker_name] : null, [t("conf.mobile"), b.mobile],
+        b.arrival_contact_name || b.arrival_contact_phone ? [t("conf.arrival_contact"), [b.arrival_contact_name, b.arrival_contact_phone].filter(Boolean).join(" · ")] : null,
+        b.arrival_time ? [t("sum.arrival"), fmtTime(b.arrival_time)] : null, b.darshan_date ? [t("sum.darshan"), fmtDate(b.darshan_date)] : null, b.special_requests ? [t("conf.requests"), b.special_requests] : null])),
+      h("div", null, h("h3", null, t("conf.amount")),
+        b.price ? priceBox(b.price, t("price.title")) : dl([[t("sum.total"), inr.format(b.amount), "total"]]),
+        dl([[t("conf.payment"), b.payment.paid ? t("conf.pay_online", { amount: inr.format(b.payment.paid) }) : t("conf.pay_counter")],
+          b.payment.paid && b.payment.balance > 0 && !cancelled ? [t("conf.pay_balance"), inr.format(b.payment.balance)] : null]),
+        b.checkin_qr ? h("div", null, h("h3", { style: "margin-top:1rem" }, t("conf.qr_title")), h("img", { class: "qr", src: b.checkin_qr, alt: t("conf.qr_alt"), width: 160, height: 160 }), h("p", { class: "small muted", style: "text-align:center" }, b.checkin_code)) : null,
+        h("h3", { style: "margin-top:1rem" }, t("conf.contact")), h("p", null, h("strong", null, p.name)),
         h("p", { class: "small" }, `${p.contact_person ? p.contact_person + " · " : ""}`, h("a", { href: "tel:" + p.phone }, p.phone)))),
-    cancelled && b.cancel_reason ? h("p", { class: "muted" }, "Cancelled: " + b.cancel_reason) : null,
-    h("div", { class: "actions noprint" }, h("button", { class: "btn", type: "button", onclick: () => window.print() }, "Print / Save as PDF"),
-      b.can_cancel ? h("button", { class: "btn danger", type: "button", onclick: (e) => openCancel(b, e.currentTarget) }, "Cancel booking") : null,
-      h("a", { class: "btn secondary", href: "#/", style: "text-decoration:none;display:inline-grid;place-items:center" }, "Book another room")),
-    b.status === "Confirmed" ? h("p", { class: "small muted noprint" }, b.can_cancel ? `You can cancel online until ${fmtWhen(b.cancel_deadline)}.` : `Online cancellation closed on ${fmtWhen(b.cancel_deadline)}. Please call ${p.phone} to cancel.`) : null);
+    cancelled && b.cancel_reason ? h("p", { class: "muted" }, t("conf.cancelled", { reason: b.cancel_reason })) : null,
+    cancelled && b.payment.refund_status && b.payment.refund_status !== "none" ? h("p", { class: "muted", role: "status" }, refundLine(b))
+      : cancelled && b.refund && b.refund.amount > 0 ? h("p", { class: "muted" }, t("refund.due", { amount: inr.format(b.refund.amount) })) : null,
+    h("div", { class: "actions noprint" }, h("button", { class: "btn", type: "button", onclick: () => window.print() }, t("conf.print")),
+      mode === "account" ? h("a", { class: "btn secondary", href: `/api/me/receipt?booking_id=${b.booking_id}&lang=${I18N.lang}`, download: "" }, t("conf.receipt")) : null,
+      h("button", { class: "btn secondary", type: "button", onclick: () => downloadPdf(b, mode) }, t("conf.pdf")),
+      b.can_change ? h("button", { class: "btn secondary", type: "button", onclick: (e) => openChange(b, mode, e.currentTarget, swap) }, t("change.open")) : null,
+      mode === "account" && b.status === "Confirmed" ? h("button", { class: "btn secondary", type: "button", onclick: (e) => openEdit(b, e.currentTarget, swap) }, t("edit.open")) : null,
+      b.can_cancel ? h("button", { class: "btn danger", type: "button", onclick: (e) => openCancel(b, e.currentTarget, mode, swap) }, t("cancel.submit")) : null,
+      mode === "account" ? null : h("a", { class: "btn secondary", href: "#/" }, t("conf.another"))),
+    b.status === "Confirmed" ? h("p", { class: "small muted noprint" }, b.can_cancel ? t("policy.until_when", { when: fmtWhen(b.cancel_deadline) }) : t("err.cancel_closed", { when: fmtWhen(b.cancel_deadline), phone: p.phone })) : null);
 }
 
 function confirmedView(root) {
   let saved = null; try { saved = JSON.parse(sessionStorage.getItem("last")); } catch {}
   if (!S.last && !saved) { location.hash = "#/booking"; return; }
-  const box = h("div"); root.replaceChildren(h("h1", { tabindex: "-1" }, "Your booking"), box);
+  const box = h("div"); root.replaceChildren(h("h1", { tabindex: "-1" }, t("conf.title")), box);
   const show = (b) => { S.last = b; box.replaceChildren(bookingCard(b, true)); root.querySelector("h1").focus(); };
   if (S.last) show(S.last);
   else { box.replaceChildren(loading()); api("/api/public/booking/lookup", { booking_id: saved.id, phone: saved.phone }).then(show).catch(() => { location.hash = "#/booking"; }); }
@@ -449,11 +1010,11 @@ function confirmedView(root) {
 
 function myBookingView(root) {
   const out = h("div", { "aria-live": "polite" });
-  const f = h("form", { class: "card lookup", "aria-label": "Find my booking" },
-    h("div", null, h("label", { for: "m_id", class: "req" }, "Booking ID"), h("input", { id: "m_id", name: "booking_id", required: true, inputmode: "numeric", autocomplete: "off", placeholder: "e.g. 48" })),
-    h("div", null, h("label", { for: "m_phone", class: "req" }, "Mobile number used for the booking"), h("input", { id: "m_phone", name: "phone", type: "tel", required: true, inputmode: "tel", autocomplete: "tel" })),
-    h("button", { class: "btn", type: "submit" }, "Find my booking"));
-  root.replaceChildren(h("h1", { tabindex: "-1" }, "My booking"), h("p", { class: "muted" }, "Enter your booking ID and mobile number to view or cancel your booking."), f, out);
+  const f = h("form", { class: "card lookup", "aria-label": t("find.aria") },
+    h("div", null, h("label", { for: "m_id", class: "req" }, t("conf.id")), h("input", { id: "m_id", name: "booking_id", required: true, inputmode: "numeric", autocomplete: "off", placeholder: t("find.id_ph") })),
+    h("div", null, h("label", { for: "m_phone", class: "req" }, t("find.phone")), h("input", { id: "m_phone", name: "phone", type: "tel", required: true, inputmode: "tel", autocomplete: "tel" })),
+    h("button", { class: "btn", type: "submit" }, t("find.submit")));
+  root.replaceChildren(h("h1", { tabindex: "-1" }, t("nav.booking")), h("p", { class: "muted" }, t("find.intro")), f, h("p", { class: "muted" }, h("a", { href: "#/account" }, t("find.signin"))), out);
   f.addEventListener("submit", async (e) => {
     e.preventDefault(); out.replaceChildren(loading());
     const v = Object.fromEntries(new FormData(f));
@@ -463,44 +1024,344 @@ function myBookingView(root) {
   S.reload = () => f.requestSubmit();
 }
 
+// ---------- change dates (re-priced, availability checked) ----------
+function openChange(b, mode, opener, done) {
+  const today = S.info.today;
+  const inp = field("g_in", t("search.in"), { name: "check_in", type: "date", required: true, min: today, max: S.info.last_check_in, value: b.check_in }, true);
+  const out = field("g_out", t("search.out"), { name: "check_out", type: "date", required: true, min: addDays(today, 1), value: b.check_out }, true);
+  const result = h("div", { "aria-live": "polite" }), check = h("button", { class: "btn secondary", type: "button" }, t("change.check"));
+  let ok = false;
+  const dates = () => ({ check_in: $("#g_in").value, check_out: $("#g_out").value });
+  const invalidate = () => { ok = false; $("#g_submit").hidden = true; result.replaceChildren(); };
+  const drawPreview = (r) => {
+    const m = (n) => inr.format(n), diff = r.difference;
+    result.replaceChildren(h("div", { class: "summary" }, dl([[t("change.old"), `${shortDate(r.old.check_in)} → ${shortDate(r.old.check_out)}`], [t("change.old_total"), m(r.old.total)],
+      [t("change.new"), `${shortDate(r.new.check_in)} → ${shortDate(r.new.check_out)}`], [t("change.new_total"), m(r.new.quote.total), "total"],
+      [t("change.diff"), (diff > 0 ? "+" : diff < 0 ? "−" : "") + m(Math.abs(diff))]]),
+      r.rooms_moved ? h("p", { class: "hint" }, t("change.moved", { count: r.rooms_moved })) : null,
+      r.promo_dropped ? h("p", { class: "hint bad" }, t("change.promo_dropped")) : null,
+      h("p", { class: "hint" }, t("change.pay_note"))));
+  };
+  check.onclick = async () => {
+    check.disabled = true; invalidate();
+    try { const r = await bapi(mode, "change", b, { ...dates(), confirm: false }); ok = true; drawPreview(r); $("#g_submit").hidden = false; }
+    catch (x) { result.replaceChildren(note("error", x.message)); }
+    finally { check.disabled = false; }
+  };
+  openDialog({ title: t("change.title", { id: b.booking_id }), opener, submit: t("change.confirm"), body: [h("p", { class: "muted" }, t("change.intro")), h("div", { class: "row" }, inp, out), check, result],
+    onSubmit: async () => {
+      if (!ok) return;
+      const r = await bapi(mode, "change", b, { ...dates(), confirm: true });
+      $("#gdlg").close(); toast(t("change.done")); done(r.booking);
+    } });
+  $("#g_submit").hidden = true;
+  $("#g_in").addEventListener("change", () => { $("#g_out").min = addDays($("#g_in").value, 1); if ($("#g_out").value <= $("#g_in").value) $("#g_out").value = addDays($("#g_in").value, 1); invalidate(); });
+  $("#g_out").addEventListener("change", invalidate);
+}
+
+// ---------- edit details that do not change rooms or price (signed-in guests) ----------
+function openEdit(b, opener, done) {
+  openDialog({ title: t("edit.title", { id: b.booking_id }), opener, submit: t("edit.save"), body: [
+    h("div", { class: "row" }, field("e_arrive", t("book.arrive"), { type: "time", value: b.arrival_time || "" }), field("e_darshan", t("book.darshan"), { type: "date", min: S.info.today, value: b.darshan_date || "" })),
+    field("e_req", t("book.requests"), { tag: "textarea", maxlength: 500, value: b.special_requests || "" }),
+    h("div", { class: "row" }, field("e_acname", t("book.ac_name"), { maxlength: 100, value: b.arrival_contact_name || "" }), field("e_acphone", t("book.ac_phone"), { type: "tel", maxlength: 20, inputmode: "tel", value: b.arrival_contact_phone || "" }))],
+  onSubmit: async () => {
+    const r = await api("/api/me/booking/update", { booking_id: b.booking_id, arrival_time: $("#e_arrive").value, darshan_date: $("#e_darshan").value, special_requests: $("#e_req").value,
+      arrival_contact_name: $("#e_acname").value, arrival_contact_phone: $("#e_acphone").value });
+    $("#gdlg").close(); toast(t("edit.done")); done(r);
+  } });
+}
+
 let cctx = null;
-function openCancel(b, opener) {
-  cctx = { b, opener }; $("#c_reason").value = ""; $("#c_err").hidden = true;
-  $("#c_intro").textContent = `Booking #${b.booking_id} at ${b.property.name}, ${fmtDate(b.check_in)} to ${fmtDate(b.check_out)}.`;
+function openCancel(b, opener, mode = "lookup", done) {
+  cctx = { b, opener, mode, done }; $("#c_reason").value = ""; $("#c_err").hidden = true;
+  $("#c_intro").textContent = t("cancel.intro", { id: b.booking_id, property: b.property.name, from: fmtDate(b.check_in), to: fmtDate(b.check_out) });
   $("#cdlg").showModal();
 }
 $("#c_back").onclick = () => $("#cdlg").close();
 $("#cdlg").addEventListener("close", () => { if (cctx?.opener?.isConnected) cctx.opener.focus(); });
 $("#cform").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const { b } = cctx, btn = $("#c_submit"); btn.disabled = true; $("#c_err").hidden = true;
+  const { b, mode, done } = cctx, btn = $("#c_submit"); btn.disabled = true; $("#c_err").hidden = true;
   try {
-    const phone = S.lookup?.phone || JSON.parse(sessionStorage.getItem("last") || "{}").phone || b.mobile;
-    const r = await api("/api/public/booking/cancel", { booking_id: b.booking_id, phone, reason: $("#c_reason").value });
-    cctx.opener = null; $("#cdlg").close(); toast("Your booking has been cancelled.");
-    const box = $("#view article")?.parentElement; if (box) box.replaceChildren(bookingCard(r, false));
+    const r = await bapi(mode, "cancel", b, { reason: $("#c_reason").value });
+    cctx.opener = null; $("#cdlg").close(); toast(t("cancel.done")); done(r);
   } catch (x) { $("#c_err").textContent = x.message; $("#c_err").hidden = false; }
   finally { btn.disabled = false; }
 });
 
+// ---------- My bookings: sign in with an SMS code, then view, change, cancel, receipts, saved details ----------
+async function accountView(root) {
+  const box = h("div", { "aria-live": "polite" });
+  root.replaceChildren(h("h1", { tabindex: "-1" }, t("acct.title")), box);
+  const show = async () => {
+    box.replaceChildren(loading());
+    try {
+      const s = await api("/api/me/session"); S.csrf = s.csrf;
+      const d = await api("/api/me/bookings");
+      box.replaceChildren(h("div", { class: "acct-head" }, h("p", { class: "muted" }, t("acct.signed_in", { last4: s.phone_last4 })),
+        h("button", { class: "btn secondary small", type: "button", onclick: async () => { await api("/api/me/logout", {}).catch(() => {}); S.csrf = ""; show(); } }, t("acct.signout"))),
+        h("div", { class: "acct-list" }, d.bookings.length ? d.bookings.map((b) => bookingCard(b, false, "account", show)) : note("", t("acct.none"))),
+        d.waitlist.length ? h("section", { class: "card pg" }, h("h2", null, t("acct.waitlist")), d.waitlist.map((w) => h("div", { class: "actions", style: "align-items:center;margin-top:var(--s2)" },
+          h("span", null, `${w.property || t("search.any_property")} · ${shortDate(w.check_in)} → ${shortDate(w.check_out)} · ${statusLabel(w.status)}`),
+          h("button", { class: "btn danger small", type: "button", onclick: async () => { await api("/api/me/waitlist/cancel", { id: w.id }); show(); } }, t("acct.waitlist_cancel"))))) : null,
+        h("section", { class: "card pg" }, h("h2", null, t("acct.saved")),
+          d.profile ? [dl([[t("conf.name"), d.profile.name || "—"], [t("book.email"), d.profile.email || "—"], [t("book.idtype"), d.profile.id_type || "—"]]), h("p", { class: "hint" }, t("acct.saved_note")),
+            h("button", { class: "btn danger small", type: "button", onclick: async () => { await api("/api/me/profile/delete", {}); toast(t("acct.saved_deleted")); show(); } }, t("acct.saved_delete"))]
+            : h("p", { class: "muted" }, t("acct.saved_none"))));
+    } catch (x) { if (x.status === 401) loginForm(); else box.replaceChildren(note("error", x.message)); }
+  };
+  function loginForm() {
+    const err = h("p", { class: "msg error", role: "alert", hidden: true }), cap = h("div", { id: "ac_captcha" }), status = h("p", { class: "hint", role: "status" });
+    const phone = field("ac_phone", t("find.phone"), { type: "tel", inputmode: "tel", autocomplete: "tel", required: true, maxlength: 20, pattern: "[+]?[0-9 \\-]{10,16}", title: t("book.phone_title") }, true);
+    const code = field("ac_code", t("otp.code"), { inputmode: "numeric", autocomplete: "one-time-code", maxlength: 6, pattern: "[0-9]{6}" }), codeRow = h("div", { hidden: true }, code, h("button", { class: "btn", type: "submit", style: "margin-top:var(--s3)" }, t("otp.verify")));
+    const send = h("button", { class: "btn", type: "button" }, t("otp.send"));
+    const f = h("form", { class: "card lookup", "aria-label": t("acct.login") }, h("p", { class: "muted" }, t("acct.intro")), phone, cap, send, status, codeRow, err);
+    const cb = captchaBox(cap);
+    box.replaceChildren(f);
+    send.onclick = async () => {
+      if (!$("#ac_phone").reportValidity()) return;
+      send.disabled = true; err.hidden = true;
+      try {
+        const r = await api("/api/public/otp/send", { phone: $("#ac_phone").value, purpose: "login", lang: I18N.lang, captcha_token: cb.token() });
+        codeRow.hidden = false; $("#ac_code").focus(); status.textContent = t("acct.sent");
+        let left = r.resend_after; const tick = () => { if (left > 0) { send.textContent = t("otp.resend_in", { n: left }); left--; setTimeout(tick, 1000); } else { send.disabled = false; send.textContent = t("otp.resend"); } }; tick();
+      } catch (x) { err.textContent = x.message; err.hidden = false; send.disabled = false; cb.reset(); }
+    };
+    f.addEventListener("submit", async (e) => {
+      e.preventDefault(); err.hidden = true;
+      try { const r = await api("/api/public/otp/verify", { phone: $("#ac_phone").value, purpose: "login", code: $("#ac_code").value }); S.csrf = r.csrf; show(); }
+      catch (x) { err.textContent = x.message; err.hidden = false; }
+    });
+  }
+  show();
+}
+
+// ---------- content pages: every fact comes from S.info (site config and settings); nothing is written into this file ----------
+const site = () => S.info.site || {};
+const digits = (v) => String(v).replace(/[^\d+]/g, "");
+const PHONE_RE = /(\+?\d[\d\s-]{1,18}\d)/g;
+const linkPhones = (text) => String(text).split(PHONE_RE).map((part, i) => i % 2 ? h("a", { href: "tel:" + digits(part) }, part) : part);  // odd parts are the numbers
+const para = (text, phones) => String(text).split(/\n{2,}/).map((p) => h("p", { class: "pre" }, ...(phones ? linkPhones(p) : [p])));
+const sec = (title, ...kids) => { kids = kids.flat().filter(Boolean); return kids.length ? h("section", { class: "card pg" }, h("h2", null, title), kids) : null; };
+const block = (key, title) => (site()[key] ? sec(title, para(site()[key])) : null);
+const MAP_OK = /^https:\/\/(www\.google\.com\/maps\/embed|www\.openstreetmap\.org\/export\/embed\.html)/;
+const MAPS = { embed: (url) => (url && MAP_OK.test(url) ? h("iframe", { class: "map", src: url, title: t("dir.map_title"), loading: "lazy", referrerpolicy: "no-referrer", allowfullscreen: true }) : null) };  // no map set: the page shows the link only
+const ext = (url) => /^https:\/\//.test(url || "");
+
+function contactButtons() {
+  const s = site(), out = [];
+  if (s.rooms_phone) out.push(h("a", { class: "btn", href: "tel:" + digits(s.rooms_phone) }, t("contact.call", { number: s.rooms_phone })));
+  if (s.whatsapp_number) out.push(h("a", { class: "btn secondary", href: "https://wa.me/" + digits(s.whatsapp_number).replace("+", ""), target: "_blank", rel: "noopener" }, t("contact.whatsapp")));
+  if (s.support_email) out.push(h("a", { class: "btn secondary", href: "mailto:" + s.support_email }, s.support_email));
+  return out.length ? h("div", { class: "actions" }, out) : null;
+}
+function pageView(root, name, parts) {
+  const body = parts.filter(Boolean);
+  root.replaceChildren(h("h1", { tabindex: "-1" }, t("nav." + name)), ...(body.length ? body : [note("", h("p", null, t("page.empty")), contactButtons())]));
+}
+
+// The same settings the server enforces (cutoff) and the office has decided (refund): the policy page and the booking step both read them from here
+function policyLines(checkIn) {
+  const st = S.info.settings, hrs = st.guest_cancel_cutoff_hours, lines = [];
+  if (checkIn) lines.push(hrs ? t("policy.until_when", { when: fmtWhen(new Date(`${checkIn}T${st.checkin_time}`).getTime() - hrs * 3600e3) }) : t("policy.until_checkin"));
+  else lines.push(hrs ? t("policy.cutoff", { count: hrs }) : t("policy.until_checkin"));
+  lines.push(t("policy.after"));
+  if (st.refund_percent != null) lines.push(t("policy.refund_percent", { percent: st.refund_percent }));
+  if (st.refund_days != null) lines.push(st.refund_days === 0 ? t("policy.refund_instant") : t("policy.refund_days", { count: st.refund_days }));
+  return lines;
+}
+function officialNotice() {
+  const u = site().official_site_url;
+  return [h("strong", null, t("official.title")), " ", u && ext(u) ? [t("official.with_url_before"), " ", h("a", { href: u, target: "_blank", rel: "noopener" }, u), ". ", t("official.with_url_after")] : t("official.generic")];
+}
+
+const PAGE_VIEWS = {
+  policy: (root) => pageView(root, "policy", [
+    sec(t("policy.summary"), h("ul", { class: "plain" }, policyLines().map((l) => h("li", null, l))), h("p", { class: "muted" }, t("policy.nothing_online"))),
+    block("cancellation_policy", t("policy.details")), block("refund_policy", t("policy.refunds"))]),
+  know: (root) => { const st = S.info.settings; pageView(root, "know", [
+    sec(t("know.times_h"), h("p", null, t("know.times", { checkin: fmtTime(st.checkin_time), checkout: fmtTime(st.checkout_time) }))),
+    block("id_rules", t("know.id")), block("dress_code", t("know.dress")), block("stay_rules", t("know.rules")), block("packing_guide", t("know.packing"))]); },
+  directions: (root) => { const s = site(); pageView(root, "directions", [
+    s.map_embed_url || s.map_url ? sec(t("dir.map"), MAPS.embed(s.map_embed_url), ext(s.map_url) ? h("p", null, h("a", { href: s.map_url, target: "_blank", rel: "noopener" }, t("dir.open_map"))) : null) : null,
+    s.distance_station || s.distance_busstand ? sec(t("dir.distances"), dl([s.distance_station ? [t("dir.station"), s.distance_station] : null, s.distance_busstand ? [t("dir.busstand"), s.distance_busstand] : null])) : null,
+    block("directions", t("dir.reach")), block("transport_tips", t("dir.transport"))]); },
+  pilgrim: (root) => { const s = site(); pageView(root, "pilgrim", [
+    block("darshan_timings", t("pil.darshan")), block("pooja_timings", t("pil.pooja")), block("seva_timings", t("pil.seva")), block("annadanam_timings", t("pil.annadanam")),
+    sec(t("pil.nearby"), [["place_tungabhadra", t("place.tungabhadra")], ["place_panchamukhi", t("place.panchamukhi")], ["places_other", t("place.other")]].filter(([k]) => s[k]).map(([k, title]) => [h("h3", null, title), para(s[k])]))]); },
+  contact: (root) => { const s = site(); pageView(root, "contact", [
+    contactButtons() ? sec(t("contact.rooms"), contactButtons()) : null,
+    s.emergency_contacts ? sec(t("contact.emergency"), para(s.emergency_contacts, true)) : null, s.medical_contacts ? sec(t("contact.medical"), para(s.medical_contacts, true)) : null,
+    sec(t("contact.houses"), S.info.properties.filter((p) => p.phone).map((p) => h("p", null, h("strong", null, p.name), " · ", h("a", { href: "tel:" + digits(p.phone) }, p.phone))))]); },
+  faq: (root) => pageView(root, "faq", S.info.faqs.map((f) => h("details", { class: "card faq" }, h("summary", null, f.question), para(f.answer)))),
+  privacy: (root) => pageView(root, "privacy", [
+    sec(t("priv.collect_h"), h("p", null, t("priv.collect_intro")), h("ul", { class: "plain" }, ["priv.c1", "priv.c2", "priv.c3", "priv.c4", "priv.c5"].map((k) => h("li", null, t(k))))),
+    sec(t("priv.use_h"), h("p", null, t("priv.use"))),
+    block("privacy_policy", t("priv.policy")), block("privacy_contact", t("priv.contact"))]),
+};
+
+// ---------- sevas and packages in the booking dialog ----------
+const CATALOG = () => (S.info && S.info.catalog) || { sevas: [], packages: [] };
+function stayDates() { const { r } = bctx, out = []; for (let d = r.check_in; d <= r.check_out; d = addDays(d, 1)) out.push(d); return out; }
+function buildSevas() {
+  const cat = CATALOG(), box = $("#b_seva"), body = $("#b_seva_body");
+  box.hidden = !(cat.sevas.length || cat.packages.length); body.replaceChildren();
+  if (box.hidden) return;
+  const dates = stayDates(), onchange = () => queueQuote();
+  if (cat.packages.length) body.append(h("div", null, h("label", { for: "b_pkg" }, t("seva.package")), h("select", { id: "b_pkg", onchange }, h("option", { value: "" }, t("seva.no_package")),
+    cat.packages.map((p) => h("option", { value: p.id }, `${p.name} (${t("seva.package_items", { count: p.items.length, discount: p.discount_percent })})`)))));
+  cat.sevas.forEach((sv) => body.append(h("div", { class: "row", style: "align-items:end" },
+    h("label", { class: "check1" }, h("input", { type: "checkbox", class: "sv_on", "data-id": sv.id, onchange }), h("span", null, sv.name, h("span", { class: "hint", style: "display:block" }, t("seva.price", { price: inr.format(sv.price) })))),
+    h("div", null, h("label", { for: "sd" + sv.id, class: "small" }, t("seva.date")), h("select", { id: "sd" + sv.id, class: "sv_date", "data-id": sv.id, onchange }, dates.map((d) => h("option", { value: d }, fmtDate(d))))),
+    h("div", null, h("label", { for: "sq" + sv.id, class: "small" }, t("seva.qty")), h("input", { id: "sq" + sv.id, class: "sv_qty", "data-id": sv.id, type: "number", min: 1, max: 50, value: Math.min(+$("#b_guests").value || 1, 50), inputmode: "numeric", oninput: onchange })))));
+}
+const sevaPick = () => [...document.querySelectorAll(".sv_on:checked")].map((c) => ({ seva_id: +c.dataset.id, date: $(`#sd${c.dataset.id}`).value, qty: +$(`#sq${c.dataset.id}`).value || 1 }));
+const packagePick = () => ($("#b_pkg") || {}).value || "";
+const noticeKind = (k) => ({ weather: t("notice.weather"), river: t("notice.river"), general: t("notice.general") }[k] || k);
+
+// ---------- notices (weather, river level), offline help ----------
+function renderNotices() {
+  const list = (S.info && S.info.notices) || [];
+  $("#notices").replaceChildren(...list.map((n) => h("div", { class: "msg nbox " + n.level, role: n.level === "warning" ? "alert" : "note" }, h("strong", null, noticeKind(n.kind) + ": "), n.text)));
+}
+function cachePhones() { try { localStorage.setItem("mr_phones", JSON.stringify(S.info.properties.filter((p) => p.phone).map((p) => ({ name: p.name, phone: p.phone })))); } catch {} }
+function offlinePhones() {
+  let list = []; try { list = JSON.parse(localStorage.getItem("mr_phones") || "[]"); } catch {}
+  return list.length ? h("div", { class: "card" }, h("p", null, t("pwa.offline")), h("ul", { class: "plain" }, list.map((p) => h("li", null, h("strong", null, p.name), " · ", h("a", { href: "tel:" + digitsOnly(p.phone) }, p.phone))))) : "";
+}
+function syncOffline() { const el = $("#offline"); el.hidden = navigator.onLine; if (!navigator.onLine) el.replaceChildren(...[offlinePhones()].flat().filter(Boolean).map((n) => n)); }
+window.addEventListener("online", syncOffline); window.addEventListener("offline", syncOffline); syncOffline();
+
+// ---------- installable app, offline shell, quick re-book ----------
+if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
+window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); S.installEv = e; $("#pwa_install").hidden = false; });
+$("#pwa_install").addEventListener("click", async (e) => { e.preventDefault(); if (!S.installEv) return; S.installEv.prompt(); await S.installEv.userChoice.catch(() => {}); S.installEv = null; $("#pwa_install").hidden = true; });
+function saveRebook(x) { try { localStorage.setItem("rebook", JSON.stringify(x)); } catch {} }  // the search choices only: no name, number or ID
+function loadRebook() { try { const x = JSON.parse(localStorage.getItem("rebook")); return x && x.nights && x.guests ? x : null; } catch { return null; } }
+function rebookCard() {
+  const x = loadRebook();
+  return x && !S.search ? h("section", { class: "card", "aria-label": t("rebook.title") }, h("h2", null, t("rebook.title")), h("p", null, t("rebook.text", { nights: x.nights, guests: x.guests })),
+    h("button", { class: "btn", type: "button", onclick: () => { location.hash = "#/rebook"; } }, t("rebook.button"))) : null;
+}
+function rebookView(root) {
+  const x = loadRebook(), i = S.info;
+  if (x) S.search = { check_in: addDays(i.today, 7), check_out: addDays(i.today, 7 + x.nights), guests: x.guests, property_id: x.property_id, room_type_id: x.room_type_id };
+  location.replace("#/");  // the search form opens filled in; the guest only picks the dates
+  setTimeout(() => { const f = $("#s_in"); if (f) f.focus(); }, 50);
+}
+
+// ---------- festivals and panchanga ----------
+function festivalLine(f) {
+  return h("li", { class: "card" }, h("strong", null, f.name), " · ", f.start_date === f.end_date ? fmtDate(f.start_date) : `${fmtDate(f.start_date)} – ${fmtDate(f.end_date)}`, f.note ? h("p", { class: "muted" }, f.note) : null,
+    f.peak ? h("p", { class: "hint" }, t("fest.peak")) : null,
+    h("button", { class: "btn small secondary", type: "button", onclick: () => { const a = f.start_date < S.info.today ? addDays(S.info.today, 1) : f.start_date, b = f.end_date >= a ? addDays(f.end_date, 1) : addDays(a, 1); S.search = { check_in: a, check_out: b, guests: 2, property_id: "", room_type_id: "" }; if (location.hash === "#/" || !location.hash) route(); else location.hash = "#/"; } }, t("fest.check")));
+}
+function festivalCard() {
+  const list = (S.info && S.info.festivals) || [];
+  return list.length ? h("section", { "aria-labelledby": "fest-h" }, h("h2", { id: "fest-h" }, t("fest.title")), h("ul", { class: "plain", style: "display:grid;gap:var(--s3)" }, list.map(festivalLine)), h("p", null, h("a", { href: "#/festivals" }, t("fest.link")))) : null;
+}
+async function festivalsView(root) {
+  root.replaceChildren(h("h1", { tabindex: "-1" }, t("fest.title")), loading());
+  try {
+    const d = await api("/api/public/festivals");
+    root.replaceChildren(h("h1", { tabindex: "-1" }, t("fest.title")), d.festivals.length ? h("ul", { class: "plain", style: "display:grid;gap:var(--s3)" }, d.festivals.map(festivalLine)) : note("", t("fest.empty")),
+      d.panchanga.length ? h("section", null, h("h2", null, t("fest.panchanga")), h("div", { class: "scroll", role: "region", tabindex: "0", "aria-label": t("fest.panchanga") }, h("table", null,
+        h("tbody", null, d.panchanga.map((r) => h("tr", null, h("th", { scope: "row" }, fmtDate(r.day)), h("td", null, [r.tithi && t("fest.tithi", { value: r.tithi }), r.nakshatra && t("fest.nakshatra", { value: r.nakshatra }), r.note].filter(Boolean).join(" · ")))))))) : null);
+  } catch (e) { root.replaceChildren(note("error", e.message)); }
+}
+
+// ---------- feedback after the stay ----------
+async function feedbackView(root) {
+  const code = new URLSearchParams(location.hash.split("?")[1] || "").get("c") || "";
+  root.replaceChildren(h("h1", { tabindex: "-1" }, t("fb.title")), loading());
+  let info;
+  try { info = await api("/api/public/feedback/info?code=" + encodeURIComponent(code)); } catch (e) { return root.replaceChildren(h("h1", { tabindex: "-1" }, t("fb.title")), note("error", e.message)); }
+  if (info.done) return root.replaceChildren(h("h1", { tabindex: "-1" }, t("fb.title")), note("", t("fb.done")));
+  const stars = (name, label, req) => h("fieldset", { class: "stars" }, h("legend", { class: req ? "req" : null }, label), [1, 2, 3, 4, 5].map((n) => h("label", { "aria-label": t("fb.stars", { n }) }, h("input", { type: "radio", name, value: n, required: req }), n + " ★")));
+  const err = h("p", { class: "msg error", role: "alert", hidden: true });
+  const f = h("form", { class: "card", style: "display:grid;gap:1rem;max-width:36rem" }, h("p", { class: "muted" }, `${info.property} · ${fmtDate(info.check_in)} – ${fmtDate(info.check_out)}`), h("p", null, t("fb.intro")),
+    stars("rating", t("fb.overall"), true), stars("cleanliness", t("fb.clean")), stars("service", t("fb.service")),
+    h("div", null, h("label", { for: "fb_c" }, t("fb.comment")), h("textarea", { id: "fb_c", name: "comment", maxlength: 1000 })), honeypot("fb_web"), err, h("button", { class: "btn", type: "submit" }, t("fb.submit")));
+  f.addEventListener("submit", async (e) => {
+    e.preventDefault(); err.hidden = true; const v = Object.fromEntries(new FormData(f));
+    try { await api("/api/public/feedback", { code, rating: +v.rating, cleanliness: v.cleanliness || null, service: v.service || null, comment: v.comment, website: v.website }); root.replaceChildren(h("h1", { tabindex: "-1" }, t("fb.title")), note("", t("fb.thanks"))); }
+    catch (x) { err.textContent = x.message; err.hidden = false; }
+  });
+  root.replaceChildren(h("h1", { tabindex: "-1" }, t("fb.title")), f);
+}
+
+// ---------- festival updates (opt-in newsletter / WhatsApp) ----------
+function subscribeView(root) {
+  const err = h("p", { class: "msg error", role: "alert", hidden: true }), status = h("p", { class: "hint", role: "status" });
+  let proof = null;
+  const cap = { token: () => "", reset() {} };
+  const chk = (name, label) => h("label", { class: "check1" }, h("input", { type: "checkbox", name }), " " + label);
+  const f = h("form", { class: "card", style: "display:grid;gap:1rem;max-width:36rem" }, h("p", null, t("sub.intro")),
+    h("div", null, h("label", { for: "su_n" }, t("sub.name")), h("input", { id: "su_n", name: "name", maxlength: 100, autocomplete: "name" })),
+    h("div", { class: "otp-row" }, h("div", null, h("label", { for: "su_p" }, t("sub.phone")), h("input", { id: "su_p", name: "phone", type: "tel", inputmode: "tel", autocomplete: "tel", maxlength: 20 })),
+      h("button", { class: "btn secondary", type: "button", id: "su_send", onclick: async () => { err.hidden = true; try { await api("/api/public/otp/send", { phone: $("#su_p").value, purpose: "subscribe", lang: I18N.lang, captcha_token: cap.token() }); $("#su_box").hidden = false; $("#su_code").focus(); } catch (x) { err.textContent = x.message; err.hidden = false; } } }, t("otp.send"))),
+    h("div", { class: "otp-row", id: "su_box", hidden: true }, h("div", null, h("label", { for: "su_code" }, t("otp.code")), h("input", { id: "su_code", inputmode: "numeric", autocomplete: "one-time-code", maxlength: 6 })),
+      h("button", { class: "btn", type: "button", onclick: async () => { err.hidden = true; try { const r = await api("/api/public/otp/verify", { phone: $("#su_p").value, purpose: "subscribe", code: $("#su_code").value }); proof = r.proof; $("#su_box").hidden = true; status.textContent = t("otp.verified"); } catch (x) { err.textContent = x.message; err.hidden = false; } } }, t("otp.verify"))),
+    status, h("div", null, h("label", { for: "su_e" }, t("sub.email")), h("input", { id: "su_e", name: "email", type: "email", autocomplete: "email", maxlength: 120 })),
+    h("div", { class: "checks" }, chk("sms", t("sub.sms")), chk("whatsapp", t("sub.whatsapp")), chk("email_ok", t("sub.emailch"))),
+    h("label", { class: "check1" }, h("input", { type: "checkbox", name: "consent", required: true }), h("span", null, " " + t("sub.consent"))), honeypot("su_web"), h("div", { id: "su_cap" }), err,
+    h("button", { class: "btn", type: "submit" }, t("sub.submit")));
+  Object.assign(cap, captchaBox(f.querySelector("#su_cap")));
+  f.addEventListener("submit", async (e) => {
+    e.preventDefault(); err.hidden = true; const v = Object.fromEntries(new FormData(f));
+    if ((v.sms || v.whatsapp) && !proof) { err.textContent = t("sub.verify_first"); err.hidden = false; return; }
+    try {
+      const r = await api("/api/public/subscribe", { name: v.name, phone: v.phone, email: v.email, sms: !!v.sms, whatsapp: !!v.whatsapp, email_ok: !!v.email_ok, consent: !!v.consent, lang: I18N.lang, otp_proof: proof || "", website: v.website, captcha_token: cap.token() });
+      root.replaceChildren(h("h1", { tabindex: "-1" }, t("sub.title")), note("", t("sub.done")), r.pending_email ? note("", t("sub.pending")) : null);
+    } catch (x) { err.textContent = x.message; err.hidden = false; cap.reset(); }
+  });
+  root.replaceChildren(h("h1", { tabindex: "-1" }, t("sub.title")), f);
+}
+async function subscribeConfirmView(root) {
+  const tok = new URLSearchParams(location.hash.split("?")[1] || "").get("t") || "";
+  root.replaceChildren(h("h1", { tabindex: "-1" }, t("sub.confirm_title")), loading());
+  try { await api("/api/public/subscribe/confirm", { token: tok }); root.replaceChildren(h("h1", { tabindex: "-1" }, t("sub.confirm_title")), note("", t("sub.confirm_ok"))); }
+  catch (e) { root.replaceChildren(h("h1", { tabindex: "-1" }, t("sub.confirm_title")), note("error", e.message)); }
+}
+function unsubscribeView(root) {
+  const tok = new URLSearchParams(location.hash.split("?")[1] || "").get("t") || "";
+  const out = h("div", { "aria-live": "polite" });
+  root.replaceChildren(h("h1", { tabindex: "-1" }, t("sub.unsub_title")), h("p", null, t("sub.unsub_text")), h("button", { class: "btn", type: "button", onclick: async () => {  // a button, not a link: mail scanners that open links must not unsubscribe anyone
+    try { await api("/api/public/unsubscribe", { token: tok }); out.replaceChildren(note("", t("sub.unsub_done"))); } catch (e) { out.replaceChildren(note("error", e.message)); } } }, t("sub.unsub_btn")), out);
+}
+const EXTRA_VIEWS = { festivals: festivalsView, feedback: feedbackView, subscribe: subscribeView, "subscribe-confirm": subscribeConfirmView, unsubscribe: unsubscribeView, rebook: rebookView };
+
+// ---------- display modes: larger text and high contrast (remembered in this browser) ----------
+function a11yState() { try { return JSON.parse(localStorage.getItem("a11y") || "{}"); } catch { return {}; } }
+function a11yApply() {
+  const a = a11yState(), r = document.documentElement;
+  a.text ? r.dataset.text = "large" : delete r.dataset.text; a.contrast ? r.dataset.contrast = "high" : delete r.dataset.contrast;
+  $("#a11y_text").setAttribute("aria-pressed", !!a.text); $("#a11y_contrast").setAttribute("aria-pressed", !!a.contrast);
+}
+for (const [id, key] of [["#a11y_text", "text"], ["#a11y_contrast", "contrast"]]) $(id).addEventListener("click", () => { const a = a11yState(); a[key] = !a[key]; try { localStorage.setItem("a11y", JSON.stringify(a)); } catch {} a11yApply(); });
+a11yApply();
+
 // ---------- router, menu, start ----------
 async function route() {
-  const name = location.hash.replace(/^#\/?/, "").split("/")[0] || "home";
+  const name = location.hash.replace(/^#\/?/, "").split(/[/?]/)[0] || "home";
   const root = $("#view");
   $("#hero").hidden = name !== "home";
   document.querySelectorAll("#nav a[data-r]").forEach((a) => { if (a.dataset.r === name) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
-  if (!S.info) { root.replaceChildren(loading()); try { S.info = await api("/api/public/info"); } catch (e) { root.replaceChildren(note("error", h("strong", null, "The booking site is not reachable right now."), h("p", null, e.message))); return; } }
-  if (!S.info.settings.guest_booking_enabled && name === "home") { root.replaceChildren(note("", h("h2", null, "Online booking is closed right now"), h("p", null, "Please contact the property directly to book a room."), h("p", { style: "margin-top:.5rem" }, h("a", { href: "#/booking" }, "Already booked? Look up your booking."))), h("section", { style: "margin-top:2rem" }, h("h2", null, "Our guest houses"), h("ul", { class: "props" }, S.info.properties.map((p) => h("li", { class: "card", style: "padding:1rem" }, h("h3", null, p.name), h("p", null, p.phone)))))); return; }
-  ({ home: homeView, booking: myBookingView, confirmed: confirmedView }[name] || homeView)(root);
-  document.title = ({ home: "Book a room", booking: "My booking", confirmed: "Booking confirmed" }[name] || "Book a room") + " · Mantralayam Rooms";
+  if (!S.info) { root.replaceChildren(loading()); try { S.info = await api("/api/public/info?lang=" + I18N.lang); cachePhones(); } catch (e) { root.replaceChildren(note("error", h("strong", null, t("route.unreachable")), h("p", null, e.message)), offlinePhones()); return; } }
+  renderNotices();
+  document.querySelectorAll("a[data-staff]").forEach((a) => { a.href = S.info.staff_url; });
+  if (!S.info.settings.guest_booking_enabled && name === "home") { root.replaceChildren(note("", h("h2", null, t("route.closed")), h("p", null, t("route.closed_hint")), h("p", { style: "margin-top:.5rem" }, h("a", { href: "#/booking" }, t("route.lookup")))), h("section", { style: "margin-top:2rem" }, h("h2", null, t("route.houses")), h("ul", { class: "props" }, S.info.properties.map((p) => h("li", { class: "card", style: "padding:1rem" }, h("h3", null, p.name), h("p", null, p.phone)))))); return; }
+  ({ home: homeView, booking: myBookingView, account: accountView, confirmed: confirmedView, ...EXTRA_VIEWS, ...PAGE_VIEWS }[name] || homeView)(root);
+  document.title = (EXTRA_VIEWS[name] ? ($("h1", root) || {}).textContent || t("nav.book") : t(PAGE_VIEWS[name] ? "nav." + name : { booking: "nav.booking", account: "nav.account", confirmed: "title.confirmed" }[name] || "nav.book")) + " · Mantralayam Rooms";
   closeMenu();
 }
 const nav = $("#nav"), mq = matchMedia("(max-width: 960px)");
-function closeMenu() { $("#menu-btn").setAttribute("aria-expanded", "false"); nav.hidden = mq.matches; }
+function closeMenu() { $("#menu-btn").setAttribute("aria-expanded", "false"); nav.hidden = mq.matches; nav.querySelectorAll("details").forEach((d) => { d.open = false; }); }
 $("#menu-btn").onclick = () => { const o = $("#menu-btn").getAttribute("aria-expanded") !== "true"; $("#menu-btn").setAttribute("aria-expanded", o); nav.hidden = !o; };
 mq.addEventListener("change", closeMenu); closeMenu();
 window.addEventListener("hashchange", () => { route(); window.scrollTo({ top: 0 }); });
-route();
+I18N.init().then(() => { document.addEventListener("langchange", () => { S.info = null; ERR = null; route(); }); route(); });
 </script>
 <noscript><p style="padding:2rem">This booking site needs JavaScript. Please call the property to book a room.</p></noscript>
 </body>

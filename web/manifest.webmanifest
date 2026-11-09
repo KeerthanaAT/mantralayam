@@ -1,0 +1,20 @@
+{
+  "name": "Mantralayam Rooms",
+  "short_name": "MR Rooms",
+  "description": "Pilgrim accommodation at Mantralayam: book rooms and sevas.",
+  "id": "/",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#2b1a12",
+  "theme_color": "#2b1a12",
+  "icons": [
+    { "src": "/images/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/images/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/images/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Book your last stay again", "short_name": "Book again", "url": "/#/rebook", "icons": [{ "src": "/images/icon-192.png", "sizes": "192x192" }] },
+    { "name": "My booking", "short_name": "My booking", "url": "/#/booking", "icons": [{ "src": "/images/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

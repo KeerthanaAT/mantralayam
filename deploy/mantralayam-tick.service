@@ -1,0 +1,31 @@
+# The 5-minute job: staff alerts (failed or stale backup, rooms held too long) and "notify me" messages for the waiting list.
+#   sudo cp deploy/mantralayam-tick.service deploy/mantralayam-tick.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now mantralayam-tick.timer
+[Unit]
+Description=Mantralayam Rooms periodic job (alerts, waitlist)
+
+[Service]
+Type=oneshot
+User=mantralayam
+WorkingDirectory=/opt/mantralayam-rooms
+EnvironmentFile=/etc/mantralayam/env
+ExecStart=/usr/bin/python3 /opt/mantralayam-rooms/tools/mantralayam_rooms.py tick
+NoNewPrivileges=true
+# Files this service creates (backups, the database journal) are readable by the service user only
+UMask=0077
+PrivateDevices=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectClock=true
+ProtectHostname=true
+LockPersonality=true
+RestrictNamespaces=true
+RestrictRealtime=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/mantralayam /var/backups/mantralayam

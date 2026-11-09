@@ -1,0 +1,31 @@
+# The verified daily backup (online copy, integrity check, keeps the newest 14). A failure exits non-zero, opens a dashboard alert and emails the staff.
+#   sudo cp deploy/mantralayam-backup.service deploy/mantralayam-backup.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now mantralayam-backup.timer
+[Unit]
+Description=Mantralayam Rooms database backup
+
+[Service]
+Type=oneshot
+User=mantralayam
+WorkingDirectory=/opt/mantralayam-rooms
+EnvironmentFile=/etc/mantralayam/env
+ExecStart=/usr/bin/python3 /opt/mantralayam-rooms/tools/mantralayam_rooms.py backup
+NoNewPrivileges=true
+# Files this service creates (backups, the database journal) are readable by the service user only
+UMask=0077
+PrivateDevices=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectClock=true
+ProtectHostname=true
+LockPersonality=true
+RestrictNamespaces=true
+RestrictRealtime=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/mantralayam /var/backups/mantralayam

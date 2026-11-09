@@ -1,0 +1,80 @@
+# Caddy 2 reverse proxy with automatic HTTPS (certificates from Let's Encrypt, renewed by Caddy itself).
+# Replace the host names and the staff addresses below, point the DNS A/AAAA records at this server first
+# (docs/DEPLOYMENT.md, step 2), then:  sudo cp deploy/Caddyfile /etc/caddy/Caddyfile && sudo systemctl reload caddy
+# Check the file first with:           caddy validate --config /etc/caddy/Caddyfile
+#
+# The apps listen on 127.0.0.1 only; Caddy is the only thing reachable from the internet. Caddy writes its own
+# X-Forwarded-For / X-Forwarded-Proto for every request (anything a visitor sends under those names is replaced),
+# which is what TRUST_PROXY=1 in /etc/mantralayam/env relies on. The apps add HSTS, CSP and the other security
+# headers themselves once MANTRALAYAM_HTTPS=1 is set, so they are not repeated here.
+
+{
+	# A client that sends its request slowly is cut off here, before it can hold one of the app's threads (slowloris).
+	servers {
+		timeouts {
+			read_header 10s
+			read_body 30s
+			write 60s
+			idle 2m
+		}
+	}
+}
+
+(common) {
+	encode zstd gzip
+	header -Server
+}
+
+# Access logs without the query string's guest data: mobile numbers and booking codes travel in a few staff URLs.
+# (Written for Caddy 2.6 or later; if "caddy validate" objects, use "uri_query" filters or log only the path.)
+(logging) {
+	log {
+		format filter {
+			wrap console
+			fields {
+				request>uri query {
+					replace phone REDACTED
+					replace code REDACTED
+					replace q REDACTED
+					replace reason REDACTED
+				}
+			}
+		}
+	}
+}
+
+rooms.example.org {
+	import common
+	import logging
+	request_body {
+		max_size 64KB
+	}
+	reverse_proxy 127.0.0.1:8001
+}
+
+staff.example.org {
+	import common
+	import logging
+
+	# The staff app is for the people who work at the property, not for the internet. Allow only the addresses of your VPN
+	# (Tailscale/WireGuard use 100.64.0.0/10 or the range you chose) and, if you want, the office's fixed address. Everyone else gets 403.
+	# Replace the example ranges before you go live; leaving them means nobody can reach the staff app.
+	@outside not remote_ip 100.64.0.0/10 192.0.2.0/24
+	respond @outside "Not available" 403
+
+	# JSON requests are small; only the two photo uploads (an ID photo, a room photo) may be a few megabytes.
+	@photo path_regexp ^/api/(bookings/[0-9]+/id_image|admin/room_types/[0-9]+/photo)$
+	@small not path_regexp ^/api/(bookings/[0-9]+/id_image|admin/room_types/[0-9]+/photo)$
+	request_body @small {
+		max_size 64KB
+	}
+	request_body @photo {
+		max_size 4MB
+	}
+	reverse_proxy 127.0.0.1:8002
+}
+
+# Send "www." to the main name (optional; it needs its own DNS record):
+# www.rooms.example.org {
+# 	redir https://rooms.example.org{uri} permanent
+# }

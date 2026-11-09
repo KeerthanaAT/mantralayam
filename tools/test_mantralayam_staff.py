@@ -15,6 +15,8 @@ import mantralayam_staff as s
 SRC = Path(__file__).resolve().parent.parent / ".tmp" / "mantralayam.db"
 TMP = Path(tempfile.mkdtemp())
 g.DB = TMP / "copy.db"
+g.OTP_REQUIRED = False  # guest bookings made by these tests skip the SMS code (covered in test_mantralayam_features.py)
+g.BACKUP_MAX_HOURS = 0
 shutil.copy(SRC, g.DB)
 PW = "Staff#1234"
 TODAY = g.today()
@@ -55,7 +57,8 @@ def free_room(user, pid=1, skip=()):
 def test_all():
     db = sqlite3.connect(g.DB)
     h, salt = s.make_hash(PW)
-    db.execute("UPDATE users SET pw_hash = ?, salt = ?", (h, salt)); db.commit()
+    db.execute("UPDATE users SET pw_hash = ?, salt = ?", (h, salt))
+    db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('checkin_requires_id', '0')"); db.commit()  # these tests check guests in directly; the ID rule has its own tests (test_staff_desk.py)
     before = hashlib.md5(SRC.read_bytes()).hexdigest()
 
     # login, sessions, throttling
@@ -63,11 +66,12 @@ def test_all():
     assert login("frontdesk", "wrong")[0] == 401 and login("nobody")[0] == 401
     for _ in range(5): login("frontdesk", "wrong")
     assert login("frontdesk")[0] == 429, "5 failures must lock this username"
-    s.FAILS.clear()
+    g.reset_throttle()
     for u in ("admin", "manager", "frontdesk", "housekeeping", "viewer"):
         st, m = login(u)
         assert st == 200 and m["user"]["username"] == u, (u, m)
-    assert call("viewer", "GET", "/api/meta")[1]["can"] == dict(book=False, status=False, clean=False, audit=False, admin=False)
+    can = call("viewer", "GET", "/api/meta")[1]["can"]
+    assert {k: can[k] for k in ("book", "status", "clean", "audit", "admin")} == dict(book=False, status=False, clean=False, audit=False, admin=False) and not any(can.values()), can
 
     # property scoping: front desk has properties 1,2 only
     assert call("frontdesk", "GET", "/api/dashboard", dict(property_id=3))[0] == 403
@@ -150,7 +154,8 @@ def test_all():
     pages = lambda u: [p["key"] for p in call(u, "GET", "/api/meta")[1]["pages"]]
     assert set(pages("admin")) == set(pages("manager")) | {"admin"} and "reports" in pages("admin") and "rates" in pages("admin")
     assert "reports" not in pages("frontdesk") and "rates" not in pages("frontdesk") and "audit" not in pages("frontdesk") and "settings" in pages("frontdesk")
-    assert pages("housekeeping") == ["today", "rooms", "status", "notifications", "settings"]
+    assert pages("housekeeping") == ["today", "rooms", "housekeeping", "status", "notifications", "settings"]
+    assert "desk" in pages("frontdesk") and "payments" not in pages("frontdesk") and "messages" not in pages("frontdesk") and {"payments", "messages", "desk"} <= set(pages("manager")) and "desk" not in pages("viewer") and "desk" not in pages("housekeeping")
     for u in ("frontdesk", "housekeeping", "viewer"):
         for path in ("/api/reports", "/api/room_types", "/api/settings"):
             assert call(u, "GET", path)[0] == 403, (u, path)
@@ -191,7 +196,8 @@ def test_all():
     assert [x["phone"] for x in gl] == ["9222222222"], gl
     prof = call("frontdesk", "GET", "/api/guests/profile", dict(phone="9222222222"))[1]
     assert len(prof["bookings"]) == 1 and call("frontdesk", "GET", "/api/guests/profile", dict(phone="9000000000"))[0] == 404
-    assert call("frontdesk", "POST", "/api/guests/edit", dict(phone="9222222222", guest_name="Renamed", new_phone="9333333333"))[1]["updated"] == 1
+    assert call("frontdesk", "POST", "/api/guests/edit", dict(phone="9222222222", guest_name="Renamed", new_phone="9333333333"))[0] == 403, "the mobile number is the guest's key: managers only"
+    assert call("manager", "POST", "/api/guests/edit", dict(phone="9222222222", guest_name="Renamed", new_phone="9333333333"))[1]["updated"] == 1
     assert call("viewer", "POST", "/api/guests/edit", dict(phone="9333333333", guest_name="Hack"))[0] in (401, 403)
     nt = call("frontdesk", "GET", "/api/notifications")[1]
     assert any(i["kind"] == "new" for i in nt["items"]) and any(i["kind"] == "cancelled" for i in nt["items"]) and nt["unread"] > 0
@@ -204,13 +210,15 @@ def test_all():
     assert call("manager", "GET", "/api/reports", {"from": D(5), "to": D(1)})[0] == 400 and call("manager", "GET", "/api/reports", {"from": D(-400), "to": D(1)})[0] == 400
 
     # rooms & rates
-    st, t = call("manager", "POST", "/api/room_types", dict(name="Test Suite", capacity=3, tariff=999, description="x"))
-    assert st == 200 and call("manager", "POST", "/api/room_types", dict(name="Test Suite", capacity=3, tariff=1))[0] == 409
-    assert call("manager", "POST", "/api/room_types", dict(id=t["id"], name="Test Suite 2", capacity=0, tariff=1))[0] == 400
-    assert call("manager", "POST", "/api/room_types", dict(id=t["id"], name="Test Suite 2", capacity=4, tariff="abc"))[0] == 400
-    assert call("manager", "POST", "/api/room_types", dict(id=t["id"], name="Test Suite 2", capacity=4, tariff=1200))[0] == 200
-    assert call("manager", "POST", "/api/room_types/1/delete")[0] == 409, "types in use cannot be deleted"
-    assert call("manager", "POST", f"/api/room_types/{t['id']}/delete")[0] == 200 and call("manager", "POST", f"/api/room_types/{t['id']}/delete")[0] == 404
+    assert call("manager", "POST", "/api/room_types", dict(name="Mgr Suite", capacity=3, tariff=1))[0] == 403, "room types and tariffs are shared by every property: super admin only"
+    assert call("manager", "POST", "/api/room_types/1/delete")[0] == 403
+    st, t = call("admin", "POST", "/api/room_types", dict(name="Test Suite", capacity=3, tariff=999, description="x"))
+    assert st == 200 and call("admin", "POST", "/api/room_types", dict(name="Test Suite", capacity=3, tariff=1))[0] == 409
+    assert call("admin", "POST", "/api/room_types", dict(id=t["id"], name="Test Suite 2", capacity=0, tariff=1))[0] == 400
+    assert call("admin", "POST", "/api/room_types", dict(id=t["id"], name="Test Suite 2", capacity=4, tariff="abc"))[0] == 400
+    assert call("admin", "POST", "/api/room_types", dict(id=t["id"], name="Test Suite 2", capacity=4, tariff=1200))[0] == 200
+    assert call("admin", "POST", "/api/room_types/1/delete")[0] == 409, "types in use cannot be deleted"
+    assert call("admin", "POST", f"/api/room_types/{t['id']}/delete")[0] == 200 and call("admin", "POST", f"/api/room_types/{t['id']}/delete")[0] == 404
 
     # settings and own profile
     st, cfg = call("manager", "GET", "/api/settings")
@@ -227,7 +235,7 @@ def test_all():
     assert call("frontdesk", "POST", "/api/me/password", dict(current=PW, new="LongEnough1"))[0] == 200
     assert call("fd2", "GET", "/api/meta")[0] == 401, "other sessions end after a password change"
     assert call("frontdesk", "GET", "/api/meta")[0] == 200
-    s.FAILS.clear()
+    g.reset_throttle()
     assert login("frontdesk", PW)[0] == 401 and login("frontdesk", "LongEnough1")[0] == 200
 
 
@@ -246,11 +254,91 @@ def test_all():
     assert hashlib.md5(SRC.read_bytes()).hexdigest() == before, "the real database must not change"
 
 
+def test_site_config_admin():
+    db = sqlite3.connect(g.DB)
+    for u in ("admin", "manager", "frontdesk", "viewer"):
+        assert login(u)[0] == 200, u
+    post = lambda u, **b: call(u, "POST", "/api/admin/site_config", b)
+    for u in ("manager", "frontdesk", "viewer"):  # permission: super admin only
+        assert post(u, key="rooms_phone", lang="en", value="1")[0] == 403, u
+    items = lambda: {x["key"]: x for x in call("admin", "GET", "/api/admin/data")[1]["site_config"]}
+    assert items()["rooms_phone"]["todo"] and items()["rooms_phone"]["values"] == {}, "a fresh database has no invented facts"
+    assert post("admin", key="nope", lang="en", value="x")[0] == 400 and post("admin", key="darshan_timings", lang="xx", value="x")[0] == 400
+    assert post("admin", key="rooms_phone", lang="te", value="x")[0] == 400, "non-translatable items take English only"
+    assert post("admin", key="darshan_timings", lang="en", value="x" * 2001)[0] == 400
+    assert post("admin", key="darshan_timings", lang="en", value="TODO")[0] == 200 and items()["darshan_timings"]["todo"]
+    assert post("admin", key="darshan_timings", lang="en", value="Set by the office")[0] == 200 and not items()["darshan_timings"]["todo"]
+    assert post("admin", key="darshan_timings", lang="ta", value="Tamil text")[0] == 200 and items()["darshan_timings"]["values"]["ta"] == "Tamil text"
+    assert post("admin", key="darshan_timings", lang="ta", value="")[0] == 200 and "ta" not in items()["darshan_timings"]["values"]
+    assert post("admin", key="darshan_timings", lang="en", value="")[0] == 200 and items()["darshan_timings"]["todo"]
+    assert {"admin.site_config"} <= {r[0] for r in db.execute("SELECT action FROM audit_log")}
+    db.execute("DELETE FROM site_config"); db.commit(); db.close()
+
+
+def test_quick_callback_in_queue():
+    db = sqlite3.connect(g.DB)
+    for u in ("admin", "frontdesk", "viewer"):
+        assert login(u)[0] == 200, u
+    db.execute("DELETE FROM callback_requests"); db.commit()
+    g.reset_throttle()
+    assert g.dispatch("POST", "/api/public/callback", None, dict(name="Elder", phone="9876500123", call_time="morning", lang="ta"), "6.6.6.6")[0] == 200
+    for u in ("admin", "frontdesk", "viewer"):
+        rows = call(u, "GET", "/api/callbacks")[1]
+        assert len(rows) == 1 and rows[0]["people"] is None and rows[0]["check_in"] is None and rows[0]["call_time"] == "morning" and rows[0]["lang"] == "ta", (u, rows)
+    cid = call("admin", "GET", "/api/callbacks")[1][0]["id"]
+    assert call("viewer", "POST", f"/api/callbacks/{cid}/status", {"status": "contacted"})[0] == 403
+    st, r = call("frontdesk", "POST", f"/api/callbacks/{cid}/status", {"status": "contacted"})
+    assert st == 200 and r["status"] == "contacted" and r["people"] is None
+    db.execute("DELETE FROM callback_requests"); db.commit(); db.close()
+
+
+def test_content_admin():
+    db = sqlite3.connect(g.DB)
+    db.row_factory = sqlite3.Row
+    for u in ("admin", "manager", "frontdesk", "viewer"):
+        assert login(u)[0] == 200, u
+    post = lambda u, path, b: call(u, "POST", path, b)
+    # permissions: only a super admin edits FAQs, refund settings and site items
+    for u in ("manager", "frontdesk", "viewer"):
+        assert post(u, "/api/admin/faqs", {"texts": {"en": {"question": "Q", "answer": "A"}}})[0] == 403, u
+        assert post(u, "/api/admin/settings", {"refund_percent": 10})[0] == 403, u
+        assert post(u, "/api/admin/faqs/1/active", {"active": False})[0] == 403, u
+    # refund settings: optional, bounded, and cleared by an empty value
+    for bad in ({"refund_percent": 101}, {"refund_percent": -1}, {"refund_percent": "abc"}, {"refund_days": 91}, {"refund_days": -1}):
+        assert post("admin", "/api/admin/settings", bad)[0] == 400, bad
+    assert post("admin", "/api/admin/settings", {"refund_percent": 50, "refund_days": 7})[0] == 200
+    assert g.settings(db)["refund_percent"] == 50 and g.settings(db)["refund_days"] == 7
+    assert post("admin", "/api/admin/settings", {"refund_percent": "", "refund_days": ""})[0] == 200
+    assert g.settings(db)["refund_percent"] is None and g.settings(db)["refund_days"] is None
+    # site items are validated by kind
+    for key, val in (("rooms_phone", "abc"), ("whatsapp_number", "123"), ("map_embed_url", "https://evil.example/x"), ("map_url", "http://insecure.example")):
+        assert post("admin", "/api/admin/site_config", dict(key=key, lang="en", value=val))[0] == 400, key
+    assert post("admin", "/api/admin/site_config", dict(key="map_embed_url", lang="en", value="https://www.google.com/maps/embed?pb=1"))[0] == 200
+    assert post("admin", "/api/admin/site_config", dict(key="map_embed_url", lang="en", value=""))[0] == 200
+    # FAQs: English is required, question and answer come as a pair, other languages optional
+    texts = lambda **kw: {"texts": kw}
+    assert post("admin", "/api/admin/faqs", texts(te={"question": "Q", "answer": "A"}))[0] == 400, "English required"
+    assert post("admin", "/api/admin/faqs", texts(en={"question": "Q", "answer": ""}))[0] == 400
+    assert post("admin", "/api/admin/faqs", texts(xx={"question": "Q", "answer": "A"}, en={"question": "Q", "answer": "A"}))[0] == 400
+    assert post("admin", "/api/admin/faqs", {"texts": "no"})[0] == 400
+    st, f = post("admin", "/api/admin/faqs", dict(position=3, **texts(en={"question": "Is parking available?", "answer": "TODO"}, te={"question": "", "answer": ""})))
+    assert st == 200, f
+    listed = lambda: {x["id"]: x for x in call("admin", "GET", "/api/admin/data")[1]["faqs"]}
+    assert listed()[f["id"]]["texts"] == {"en": {"question": "Is parking available?", "answer": "TODO"}} and listed()[f["id"]]["active"] == 1
+    assert post("admin", "/api/admin/faqs", dict(id=f["id"], position=1, **texts(en={"question": "Is parking available?", "answer": "Confirmed by the office"}, ta={"question": "q", "answer": "a"})))[0] == 200
+    assert set(listed()[f["id"]]["texts"]) == {"en", "ta"}
+    assert post("admin", "/api/admin/faqs", dict(id=99999, **texts(en={"question": "Q", "answer": "A"})))[0] == 404
+    assert post("admin", f"/api/admin/faqs/{f['id']}/active", {"active": "no"})[0] == 400 and post("admin", "/api/admin/faqs/99999/active", {"active": False})[0] == 404
+    assert post("admin", f"/api/admin/faqs/{f['id']}/active", {"active": False})[0] == 200 and listed()[f["id"]]["active"] == 0
+    assert {"admin.faq_create", "admin.faq_edit", "admin.faq_deactivate"} <= {r[0] for r in db.execute("SELECT action FROM audit_log")}
+    db.execute("DELETE FROM faq_text"); db.execute("DELETE FROM faqs"); db.execute("DELETE FROM site_config"); db.commit(); db.close()
+
+
 def test_admin():
     db = sqlite3.connect(g.DB)
     h, salt = s.make_hash(PW)
     db.execute("UPDATE users SET pw_hash = ?, salt = ?, active = 1", (h, salt)); db.commit()
-    s.FAILS.clear()
+    g.reset_throttle()
     for u in ("admin", "manager", "frontdesk", "viewer"):
         assert login(u)[0] == 200, u
     # only super_admin may touch the admin screens
@@ -332,7 +420,7 @@ def test_backup_status():
     db = sqlite3.connect(g.DB)
     h, salt = s.make_hash(PW)
     db.execute("UPDATE users SET pw_hash = ?, salt = ?, active = 1", (h, salt)); db.commit()
-    s.FAILS.clear()
+    g.reset_throttle()
     for u in ("admin", "manager"):
         assert login(u)[0] == 200
     assert call("admin", "GET", "/api/dashboard")[1]["backup"] is None  # nothing has run yet
@@ -354,7 +442,7 @@ def test_alternatives_scope():
     db = sqlite3.connect(g.DB)
     h, salt = s.make_hash(PW)
     db.execute("UPDATE users SET pw_hash = ?, salt = ?, active = 1", (h, salt)); db.commit()
-    s.FAILS.clear()
+    g.reset_throttle()
     for u in ("admin", "frontdesk", "housekeeping", "viewer"):
         assert login(u)[0] == 200
     q = dict(check_in=D(40), check_out=D(42), guests=2)
@@ -403,7 +491,7 @@ def test_callbacks():
     db = sqlite3.connect(g.DB)
     h, salt = s.make_hash(PW)
     db.execute("UPDATE users SET pw_hash = ?, salt = ?, active = 1", (h, salt)); db.commit()
-    s.FAILS.clear()
+    g.reset_throttle()
     for u in ("admin", "manager", "frontdesk", "housekeeping", "viewer"):
         assert login(u)[0] == 200
     db.execute("DELETE FROM callback_requests"); db.commit()
@@ -426,7 +514,7 @@ def test_callbacks():
     ids = {r["name"]: r["id"] for r in call("admin", "GET", "/api/callbacks")[1]}
 
     # status changes: role and property checked on the server, saved, audited
-    st = lambda u, name, status: call(u, "POST", f"/api/callbacks/{ids[name]}/status", dict(status=status))
+    st = lambda u, name, status: call(u, "POST", f"/api/callbacks/{ids[name]}/status", dict(status=status, note="Spoke to the guest"))
     assert st("viewer", "Caller 1", "contacted")[0] == 403, "viewers are read-only"
     assert st("frontdesk", "Caller 2", "contacted")[0] == 404, "another property request cannot be changed"
     assert st("manager", "Caller 2", "closed")[0] == 404
@@ -450,7 +538,7 @@ def test_arrival_details():
     db = sqlite3.connect(g.DB)
     h, salt = s.make_hash(PW)
     db.execute("UPDATE users SET pw_hash = ?, salt = ?, active = 1", (h, salt)); db.commit()
-    s.FAILS.clear()
+    g.reset_throttle()
     for u in ("frontdesk", "viewer"):
         assert login(u)[0] == 200
     room = free_room("frontdesk")
@@ -492,7 +580,7 @@ def test_hold_blocks_walkin():
     db = sqlite3.connect(g.DB)
     h, salt = s.make_hash(PW)
     db.execute("UPDATE users SET pw_hash = ?, salt = ?, active = 1", (h, salt)); db.commit()
-    s.FAILS.clear()
+    g.reset_throttle()
     assert login("frontdesk")[0] == 200
     room = free_room("frontdesk")
     stay = dict(check_in=D(50), check_out=D(51))
@@ -510,7 +598,7 @@ def test_peak_admin():
     db = sqlite3.connect(g.DB)
     h, salt = s.make_hash(PW)
     db.execute("UPDATE users SET pw_hash = ?, salt = ?, active = 1", (h, salt)); db.commit()
-    s.FAILS.clear()
+    g.reset_throttle()
     for u in ("admin", "manager", "frontdesk"):
         assert login(u)[0] == 200
     pp = dict(name="Test Festival", start_date=D(40), end_date=D(44), max_nights="2", max_rooms="1", note="Book early.")
@@ -526,7 +614,7 @@ def test_peak_admin():
 
     # the guest site picks it up at once, and edits and deactivation take effect at once
     guest_search = lambda a, b: g.dispatch("GET", "/api/public/search", dict(check_in=D(a), check_out=D(b), guests=1), None, "127.0.0.1")
-    g.HITS.clear()
+    g.reset_throttle()
     st, out = guest_search(40, 43)
     assert st == 400 and "Test Festival" in out["error"], out
     assert call("admin", "POST", "/api/admin/peak_periods", pp | {"id": r["id"], "max_nights": "", "max_rooms": ""})[0] == 200  # empty means no limit
@@ -543,16 +631,106 @@ def test_peak_admin():
     db.close()
 
 
+def test_staff_features():
+    """Promo codes, pricing rules, peak surcharge, senior flag, alerts banner and the waitlist hook, as the super admin sees them."""
+    db = sqlite3.connect(g.DB)
+    h, salt = s.make_hash(PW)
+    db.execute("UPDATE users SET pw_hash = ?, salt = ?", (h, salt)); db.commit()
+    g.reset_throttle()
+    for u in ("admin", "manager", "frontdesk"):
+        assert login(u)[0] == 200
+    promo = dict(code="pilgrim 15", label="Pilgrim 15%", kind="percent", value="15", min_guests="6", valid_to=D(300), max_uses="50", per_phone_limit="2", exclude_peak=True, max_discount="")
+    st, out = call("admin", "POST", "/api/admin/promos", promo)
+    assert st == 200, out
+    row = db.execute("SELECT code, label, kind, value, min_guests, max_uses, per_phone_limit, exclude_peak, auto, active FROM promo_codes WHERE id = ?", (out["id"],)).fetchone()
+    assert row == ("PILGRIM15", "Pilgrim 15%", "percent", 15.0, 6, 50, 2, 1, 0, 1), row  # stored upper-case, spaces removed
+    pid = out["id"]
+    assert call("manager", "POST", "/api/admin/promos", promo | {"code": "OTHER1"})[0] == 403 and call("frontdesk", "GET", "/api/admin/data")[0] == 403
+    assert call("admin", "POST", "/api/admin/promos", promo)[0] == 409
+    for bad in (dict(code="a!"), dict(code=""), dict(kind="bogus"), dict(value="101", kind="percent"), dict(value="0"), dict(valid_from=D(10), valid_to=D(5), code="X1X1"), dict(label=""), dict(min_rooms="0", code="Y2Y2")):
+        assert call("admin", "POST", "/api/admin/promos", promo | {"code": "ZZZ111"} | bad)[0] == 400, bad
+    st, auto = call("admin", "POST", "/api/admin/promos", dict(label="Group rate", kind="flat", value="500", auto=True, min_rooms="3", exclude_peak=False))
+    assert st == 200 and db.execute("SELECT code, auto, exclude_peak FROM promo_codes WHERE id = ?", (auto["id"],)).fetchone() == (None, 1, 0)
+    st, edit = call("admin", "POST", "/api/admin/promos", promo | {"id": pid, "value": "20"})
+    assert st == 200 and db.execute("SELECT value FROM promo_codes WHERE id = ?", (pid,)).fetchone()[0] == 20
+    data = call("admin", "GET", "/api/admin/data")[1]
+    assert {p["id"] for p in data["promos"]} >= {pid, auto["id"]} and all("uses" in p for p in data["promos"])
+    # a guest sees the discount in the quote; deactivating removes it
+    guest_q = lambda code: g.dispatch("POST", "/api/public/quote", None, dict(property_id=1, room_type_id=2, check_in=D(30), check_out=D(32), rooms=2, guests=6, promo_code=code), "9.9.9.9")
+    st, q = guest_q("pilgrim15")
+    assert st == 200 and q["discount"]["code"] == "PILGRIM15" and q["discount"]["amount"] > 0, q
+    assert call("admin", "POST", f"/api/admin/promo_codes/{pid}/active", {"active": False})[0] == 200 and guest_q("PILGRIM15")[0] == 400
+    assert call("admin", "POST", f"/api/admin/promo_codes/{pid}/active", {"active": True})[0] == 200
+    actions = {x[0] for x in db.execute("SELECT action FROM audit_log WHERE action LIKE 'admin.promo%'")}
+    assert {"admin.promo_create", "admin.promo_edit", "admin.promo_code_deactivate", "admin.promo_code_activate"} <= actions, actions
+    # pricing rules: numbers with at most 2 decimals, empty clears
+    ok = lambda **kw: call("admin", "POST", "/api/admin/settings", kw)
+    assert ok(tax_percent="12.5", advance_percent="30", extra_bed_price="250", extra_bed_max="2", child_price="100", child_counts_capacity=False)[0] == 200
+    now = g.settings(g.connect())
+    assert now["tax_percent"] == g.Decimal("12.5") and now["child_counts_capacity"] is False and now["extra_bed_max"] == 2
+    for bad in (dict(tax_percent="abc"), dict(tax_percent="101"), dict(tax_percent="1.234"), dict(extra_bed_price="-5"), dict(extra_bed_max="9"), dict(child_counts_capacity="yes")):
+        assert ok(**bad)[0] == 400, bad
+    assert ok(tax_percent="", advance_percent="", extra_bed_price="", child_price="", extra_bed_max="1", child_counts_capacity=True)[0] == 200
+    assert g.settings(g.connect())["tax_percent"] is None and call("manager", "POST", "/api/admin/settings", {"tax_percent": "5"})[0] == 403
+    # peak price increase and the senior-citizen flag
+    pp = dict(name="Aradhana", start_date=D(400), end_date=D(402), max_nights="", max_rooms="", note="", surcharge_percent="25")
+    st, pk = call("admin", "POST", "/api/admin/peak_periods", pp)
+    assert st == 200 and db.execute("SELECT surcharge_percent FROM peak_periods WHERE id = ?", (pk["id"],)).fetchone()[0] == 25
+    assert call("admin", "POST", "/api/admin/peak_periods", pp | {"surcharge_percent": "501"})[0] == 400 and call("admin", "POST", "/api/admin/peak_periods", pp | {"surcharge_percent": "x"})[0] == 400
+    assert call("admin", "POST", "/api/admin/peak_periods", pp | {"id": pk["id"], "surcharge_percent": ""})[0] == 200 and db.execute("SELECT surcharge_percent FROM peak_periods WHERE id = ?", (pk["id"],)).fetchone()[0] is None
+    room = call("admin", "GET", "/api/admin/data")[1]["rooms"][0]
+    body = {k: room[k] for k in ("property_id", "number", "floor", "room_type_id", "capacity", "amenities", "id")}
+    assert call("admin", "POST", "/api/admin/rooms", body | {"senior_friendly": True})[0] == 200 and db.execute("SELECT senior_friendly FROM rooms WHERE id = ?", (room["id"],)).fetchone()[0] == 1
+    assert call("admin", "POST", "/api/admin/rooms", body)[0] == 200 and db.execute("SELECT senior_friendly FROM rooms WHERE id = ?", (room["id"],)).fetchone()[0] == 0
+    # the dashboard banner: managers and the super admin see open alerts, the front desk does not
+    db.execute("DELETE FROM alerts"); db.commit()
+    g.BACKUP_MAX_HOURS = 30
+    g.BACKUPS = TMP / "no-backups"
+    try:
+        for who, sees in (("admin", True), ("manager", True), ("frontdesk", False)):
+            d = call(who, "GET", "/api/dashboard")[1]
+            assert ("alerts" in d) == sees, who
+        d = call("admin", "GET", "/api/dashboard")[1]
+        assert [a["kind"] for a in d["alerts"]] == ["backup"] and "No backup" in d["alerts"][0]["message"] and d["alerts"][0]["emailed_at"] is None and "STAFF_ALERT_EMAILS" in d["alerts"][0]["email_note"]
+    finally:
+        g.BACKUP_MAX_HOURS = 0
+    db.execute("DELETE FROM alerts"); db.commit()
+    # cancelling at the desk tells a guest who was waiting for that room
+    conn = g.connect()
+    ac = [r["id"] for r in conn.execute("SELECT id FROM rooms WHERE room_type_id = 1 AND property_id = 3 AND active = 1")]
+    conn.close()
+    db.execute("DELETE FROM bookings WHERE source = 'online'"); db.commit()
+    st, bk = g.dispatch("POST", "/api/public/book", None, dict(property_id=3, room_type_id=1, check_in=D(60), check_out=D(61), rooms=1, guests=2, guest_name="Held", phone="9111222333", id_type="Aadhaar", id_number="1", payment_method="pay_at_counter"), "8.8.8.8")
+    assert st == 200, bk
+    held = db.execute("SELECT room_id FROM bookings WHERE group_id = ?", (bk["booking_id"],)).fetchone()[0]
+    for r in ac:
+        if r != held:
+            db.execute("INSERT INTO room_status_events (room_id, kind, reason, start_date, end_date, active, created_at) VALUES (?, 'internal_block', 't', ?, ?, 1, 'now')", (r, D(60), D(61)))
+    db.commit()
+    st, w = g.dispatch("POST", "/api/public/waitlist", None, dict(name="Waiter", phone="9444555666", check_in=D(60), check_out=D(61), guests=2, property_id=3, room_type_id=1), "8.8.8.9")
+    assert st == 200, w
+    g.providers.OUTBOX.clear()
+    bid = db.execute("SELECT id FROM bookings WHERE group_id = ?", (bk["booking_id"],)).fetchone()[0]
+    assert call("admin", "POST", f"/api/bookings/{bid}/cancel", {"reason": "Guest called"})[0] == 200
+    assert [x["to"] for x in g.providers.OUTBOX if x["kind"] == "sms"] == ["9111222333", "9444555666"], g.providers.OUTBOX  # the cancelled booking's guest is told, then the waiting guest
+    assert db.execute("SELECT status FROM waitlist WHERE id = ?", (w["id"],)).fetchone()[0] == "notified"
+    db.close()
+
+
 if __name__ == "__main__":
     try:
         test_all()
         test_admin()
+        test_site_config_admin()
+        test_content_admin()
         test_backup_status()
         test_alternatives_scope()
         test_callbacks()
+        test_quick_callback_in_queue()  # after test_callbacks, which counts the audit rows (the audit log is append-only)
         test_arrival_details()
         test_hold_blocks_walkin()
         test_peak_admin()
+        test_staff_features()
         print("ok")
     finally:
         shutil.rmtree(TMP, ignore_errors=True)

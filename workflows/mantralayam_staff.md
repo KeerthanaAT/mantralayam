@@ -108,3 +108,30 @@ Page `Call-backs` (`#/callbacks`) for front desk, managers, super admin and view
 
 ## Arrival details (added 2026-10-28)
 The walk-in dialog has optional "Expected arrival time" and "Darshan date" next to "Remarks"; `POST /api/bookings` validates them with the same `arrival_fields()` as the guest site (see `workflows/mantralayam_rooms.md`). Every booking returned by the staff API (`BOOKING_SQL`) carries `arrival_time` and `darshan_date`. The booking rows on the Dashboard (arrivals, late arrivals, due out, in house) and the Bookings page show, under the stay dates, "Arrives about HH:MM", "Darshan <date>" and "Remarks: ...". `POST /api/bookings/<id>/edit` changes the two fields only when the request contains them (empty clears one); no screen uses the edit endpoint yet.
+
+## Alerts banner, CSRF and health (added 2026-11-01)
+- `GET /api/dashboard` adds `alerts` (open alerts: failed, stale or missing backup; many rooms on hold; many holds lapsing) for super admins and property managers; the Today page shows them as a red banner above everything else. Opening the dashboard also re-checks the conditions. New alerts are emailed once to `STAFF_ALERT_EMAILS` (the banner says "Not emailed" when no address is configured). They clear by themselves when the condition ends.
+- The login reply and `GET /api/meta` carry `csrf`; the page sends it as `X-CSRF-Token` on every POST. The handler refuses a signed-in POST without the matching token (403) and any POST whose `Origin` is another site. The session cookie is `Secure` when `MANTRALAYAM_HTTPS=1`.
+- `GET /health` exists on this server too (same body as the guest server's). Login failures (5 per 10 minutes per address and username) are counted in the database and survive a restart.
+
+## Promo codes, pricing rules, peak prices, senior-friendly rooms (added 2026-11-01)
+- Admin > Promo codes (`POST /api/admin/promos`, activate/deactivate via `/api/admin/promo_codes/<id>/active`, super admin only, audited `admin.promo_create`, `admin.promo_edit`, `admin.promo_code_activate`/`_deactivate`): code or automatic group rate, percent or flat discount with an optional cap, minimum rooms/guests/nights, valid dates, total and per-mobile usage limits, building and room type, "not on peak dates". The list shows how many bookings used each code.
+- Admin > Settings: tax %, advance %, extra bed price and most per room, child charge, and whether children count towards capacity (`PRICING_RANGES`; empty means not charged; numbers with at most 2 decimals).
+- Admin > Peak periods: "Price increase on these nights, %" (`surcharge_percent`).
+- Admin > Rooms: "Senior-citizen friendly" checkbox (`rooms.senior_friendly`); ground floor is floor 0.
+- Booking tables show who booked for a guest, the arrival contact, children, extra beds and the discount used.
+- Cancelling, marking no-show, rescheduling or releasing a block calls `waitlist_tick_safe()`, which tells waiting guests that a stay is bookable again.
+
+
+## Front desk, ID vault, housekeeping, call-backs (added 2026-11-02)
+- **Permissions** (`PERMS` in `mantralayam_staff.py`, shown in Admin > Roles, enforced on every route): front desk works the counter (bookings, check-in, ID capture, counter payments, blocks, call-backs); a manager also reveals IDs (reason required, logged), sees Payments, Messages and the audit log, handles refunds and cancels paid bookings; the super admin also changes settings and users; housekeeping only changes room cleaning; viewers read.
+- **Front desk screen**: scan the guest's QR (camera `BarcodeDetector`, or a handheld scanner typing into the box) or type the booking ID (`GET /api/checkin/lookup`; a typed ID is marked less certain). Record the ID type and number for all rooms of the booking (encrypted with `ID_ENCRYPTION_KEY`; the booking keeps only the last four characters), optionally a photo (JPEG/PNG/WebP, shrunk by the page, at most 2.5 MB, encrypted). Check-in requires the ID (`checkin_requires_id`). `id_retention_days` erases IDs and numbers after the stay (the 5-minute job); empty = kept until set.
+- **Housekeeping board** (`GET /api/housekeeping`): blocked, to clean, being cleaned, ready, occupied; a room with a guest arriving today that is not ready is flagged. Check-out creates the cleaning task; "Mark ready" closes it.
+- **Calendar**: bookings and blocked rooms by day; click a free day to block, a blocked day to clear. A block cannot cover a booking and a booking cannot be made on a blocked room.
+- **Call-backs**: new -> contacted -> follow-up (date) <-> contacted -> closed (note required); a closed request can be reopened; every change and note keeps the time and the staff member's name; due follow-ups appear in notifications.
+- **Cancelling a paid booking** needs a manager; it records the refund by policy and tells the guest.
+- Audit log: a "Sensitive actions only" filter (IDs, money, cancellations, blocks, users, settings).
+
+## Reports, notices, feedback, broadcasts, admin lists (added 2026-11-02)
+- **Reports** (managers): arrivals and departures for a day, seva schedule, occupancy by day (rooms that could be sold = rooms minus blocked), revenue (booked value by check-in date beside money received and refunded by the day it moved), money by method, payment reconciliation, booking funnel, searches, sold-out dates, online payment outcomes. `GET /api/reports/data`, `/api/reports/csv` (formula-looking cells are prefixed with an apostrophe), `POST /api/reports/export` (Google Sheets, or `{exported: "csv"}` so the page downloads the CSV). Every export is audited because tables hold names and numbers.
+- **Admin** (super admin): Sevas, Packages, Festivals (with the peak-pricing link), Panchanga (with line import). **Notices** (front desk and up), **Feedback** (managers: averages, filter, review note), **Broadcasts** (managers: composer, history, masked subscriber list, removal on request).

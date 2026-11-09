@@ -7,7 +7,7 @@ import re
 import shutil
 import sqlite3
 import tempfile
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import mantralayam_rooms as m
@@ -15,6 +15,8 @@ import mantralayam_rooms as m
 SRC = Path(__file__).resolve().parent.parent / ".tmp" / "mantralayam.db"
 TMP = Path(tempfile.mkdtemp())
 m.DB = TMP / "copy.db"
+m.OTP_REQUIRED = False  # the OTP flow has its own tests (test_mantralayam_features.py); here bookings go straight through
+m.BACKUP_MAX_HOURS = 0  # backup recency is tested separately
 shutil.copy(SRC, m.DB)
 D = lambda n: (m.today() + timedelta(days=n)).isoformat()
 CI, CO = D(30), D(32)
@@ -33,7 +35,7 @@ REAL_ONLINE = real_online_count()
 
 
 def call(method, path, data=None):
-    m.HITS.clear()
+    m.reset_throttle()
     q, body = (data, None) if method == "GET" else (None, data)
     return m.dispatch(method, path, q, body, "127.0.0.1")
 
@@ -52,7 +54,7 @@ def pick(guests=2):
 
 
 def test_health_and_backup():
-    assert call("GET", "/health", {}) == (200, {"ok": True})
+    assert call("GET", "/health", {}) == (200, {"status": "ok", "checks": {"database": "ok", "backup": "disabled"}})
     m.BACKUPS = TMP / "backups"
     (m.BACKUPS).mkdir()
     for d in range(1, 17):  # 16 older backups, plus files that rotation must never touch
@@ -163,15 +165,14 @@ def test_all():
 
 
 def block_rooms(db, a, b, where="1=1"):
-    """Test helper: one Confirmed booking per active room (matching `where`) for [D(a), D(b)). Removed with unblock()."""
-    db.execute("INSERT INTO bookings (property_id, room_id, guest_name, phone, id_type, id_number, guests, check_in, check_out, status, created_at, status_at) "
-               f"SELECT r.property_id, r.id, 'ALT BLOCK', '9000000001', 'Other', 'x', 1, ?, ?, 'Confirmed', ?, ? FROM rooms r WHERE r.active = 1 AND {where}",
-               (D(a), D(b), m.now_iso(), m.now_iso()))
+    """Test helper: every active room (matching `where`) blocked for [D(a), D(b)) by an internal block. Removed with unblock()."""
+    db.execute("INSERT INTO room_status_events (room_id, kind, reason, start_date, end_date, created_at) "
+               f"SELECT r.id, 'internal_block', 'ALT BLOCK', ?, ?, ? FROM rooms r WHERE r.active = 1 AND {where}", (D(a), D(b), m.now_iso()))
     db.commit()
 
 
 def unblock(db):
-    db.execute("DELETE FROM bookings WHERE guest_name = 'ALT BLOCK'")
+    db.execute("DELETE FROM room_status_events WHERE reason = 'ALT BLOCK'")
     db.commit()
 
 
@@ -266,16 +267,16 @@ def test_callback():
     assert db.execute("SELECT COUNT(*) FROM audit_log WHERE action = 'callback.request'").fetchone()[0] == 2
 
     # the guest rate limit applies: 5 per 10 minutes per address, then 429 with Retry-After
-    m.HITS.clear()
+    m.reset_throttle()
     codes = [m.dispatch("POST", "/api/public/callback", None, good | dict(phone=f"98765001{i:02d}"), "5.6.7.8")[0] for i in range(6)]
     assert codes == [200] * 5 + [429], codes
     st, r = m.dispatch("POST", "/api/public/callback", None, good | dict(phone="9876500199"), "5.6.7.8")
     assert st == 429 and r["retry_after"] > 0, r
-    m.HITS.clear()
+    m.reset_throttle()
     assert [m.dispatch("POST", "/api/public/callback", None, good, "9.9.9.1")[0] for _ in range(4)] == [200, 200, 200, 429], "3 per mobile number"
 
     # search tells the page when to offer the form
-    m.HITS.clear()
+    m.reset_throttle()
     search = lambda a, b, g=2: call("GET", "/api/public/search", dict(check_in=D(a), check_out=D(b), guests=g))[1]
     assert search(40, 42)["callback"] is None
     assert search(40, 42, 200)["callback"] == "group", "rooms are free but the party needs more than the online room limit"
@@ -355,7 +356,7 @@ def test_holds_and_limits():
     from http.server import ThreadingHTTPServer
     H1, H2 = D(60), D(62)
     stay = dict(check_in=H1, check_out=H2)
-    m.HITS.clear()
+    m.reset_throttle()
     st, r = call_ip("1.1.1.1", "GET", "/api/public/search", dict(stay, guests=2))
     pid, t = r["properties"][0]["property_id"], r["properties"][0]["types"][0]
     sel = dict(stay, property_id=pid, room_type_id=t["room_type_id"], rooms=1)
@@ -368,7 +369,7 @@ def test_holds_and_limits():
             conn.close()
 
     def book_for(ip, **kw):
-        m.HITS.clear()
+        m.reset_throttle()
         N[0] += 1
         return call_ip(ip, "POST", "/api/public/book", dict(guest_name="Racer", phone=f"97654{N[0]:05d}", id_type="Aadhaar", id_number="1234",
                                                               payment_method="pay_at_counter", guests=1, **sel, **kw))
@@ -379,11 +380,11 @@ def test_holds_and_limits():
     assert free() == 1
 
     # two guests race for the last room: the first hold wins, the second cannot hold or book it
-    m.HITS.clear()
+    m.reset_throttle()
     st, a = call_ip("1.1.1.1", "POST", "/api/public/hold", sel)
     assert st == 200 and a["seconds"] == 600 and a["rooms"] == 1, a
     assert free() == 0 and free(a["token"]) == 1  # held rooms are unavailable to everyone else, not to the holder
-    m.HITS.clear()
+    m.reset_throttle()
     st, r = call_ip("2.2.2.2", "POST", "/api/public/hold", sel)
     assert st == 409 and "no longer available" in r["error"], r
     assert book_for("2.2.2.2")[0] == 409
@@ -400,7 +401,7 @@ def test_holds_and_limits():
     assert free() == 1
 
     # hold expiry: after 10 minutes the room is free again, with no cleanup job needed
-    m.HITS.clear()
+    m.reset_throttle()
     st, a = call_ip("1.1.1.1", "POST", "/api/public/hold", sel)
     assert st == 200 and free() == 0
     real_now = m.now
@@ -412,13 +413,13 @@ def test_holds_and_limits():
     finally:
         m.now = real_now
     call("POST", "/api/public/booking/cancel", dict(booking_id=b["booking_id"], phone=b["mobile"], reason="test"))
-    m.HITS.clear()
+    m.reset_throttle()
     db.execute("DELETE FROM holds"); db.commit()
 
     # release frees it at once; re-holding with the old token replaces rather than stacks
     st, a1 = call_ip("3.3.3.3", "POST", "/api/public/hold", sel)
     assert st == 200 and free() == 0
-    m.HITS.clear()
+    m.reset_throttle()
     st, a2 = call_ip("3.3.3.3", "POST", "/api/public/hold", sel | {"token": a1["token"]})
     assert st == 200 and db.execute("SELECT COUNT(DISTINCT token) FROM holds WHERE ip = '3.3.3.3'").fetchone()[0] == 1
     assert call_ip("3.3.3.3", "POST", "/api/public/release", {"token": a2["token"]})[0] == 200 and free() == 1
@@ -433,9 +434,9 @@ def test_holds_and_limits():
     m.MAX_HOLDS_PER_IP = cap
     try:
         for _ in range(cap):
-            m.HITS.clear()
+            m.reset_throttle()
             assert call_ip("5.5.5.5", "POST", "/api/public/hold", osel)[0] == 200
-        m.HITS.clear()
+        m.reset_throttle()
         st, r = call_ip("5.5.5.5", "POST", "/api/public/hold", osel)
         assert st == 429 and r["retry_after"] > 0, r
     finally:
@@ -448,23 +449,23 @@ def test_holds_and_limits():
     assert st == 400 and db.execute("SELECT COUNT(*) FROM bookings").fetchone()[0] == before, r
 
     # rate limits per IP: 429 with a wait time, and a Retry-After header over real HTTP
-    m.HITS.clear()
+    m.reset_throttle()
     codes = [call_ip("7.7.7.7", "GET", "/api/public/search", dict(stay, guests=1))[0] for _ in range(61)]
     assert codes[:60] == [200] * 60 and codes[60] == 429
     st, r = call_ip("7.7.7.7", "GET", "/api/public/search", dict(stay, guests=1))
     assert st == 429 and 1 <= r["retry_after"] <= 60 and "try again in" in r["error"], r
     assert call_ip("8.8.8.8", "GET", "/api/public/search", dict(stay, guests=1))[0] == 200  # other addresses are unaffected
-    m.HITS.clear()
+    m.reset_throttle()
     assert [call_ip("7.7.7.7", "POST", "/api/public/book", {})[0] for _ in range(11)][-1] == 429
-    m.HITS.clear()
+    m.reset_throttle()
     assert [call_ip("7.7.7.7", "POST", "/api/public/booking/lookup", dict(booking_id=1, phone="9000000000"))[0] for _ in range(21)][-1] == 429
-    m.HITS.clear()
+    m.reset_throttle()
     assert [call_ip("7.7.7.7", "POST", "/api/public/booking/cancel", dict(booking_id=1, phone="9000000000", reason="x"))[0] for _ in range(21)][-1] == 429
     m.Handler.log_message = lambda *a: None
     srv = ThreadingHTTPServer(("127.0.0.1", 0), m.Handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
-        m.HITS.clear()
+        m.reset_throttle()
         last = None
         for _ in range(21):
             req = urllib.request.Request(f"http://127.0.0.1:{srv.server_port}/api/public/booking/lookup", json.dumps(dict(booking_id=1, phone="9000000000")).encode(),
@@ -477,7 +478,7 @@ def test_holds_and_limits():
         assert json.loads(last.read())["retry_after"] == int(last.headers["Retry-After"])
     finally:
         srv.shutdown()
-    m.HITS.clear()
+    m.reset_throttle()
     db.close()
 
 
@@ -538,11 +539,142 @@ def test_peak_periods():
     db.close()
 
 
+def test_site_config():
+    call("GET", "/health", {})  # the first connection runs migrate(), which creates site_config
+    db = sqlite3.connect(m.DB)
+    db.execute("DELETE FROM site_config"); db.commit()
+    assert call("GET", "/api/public/info")[1]["site"] == {}, "nothing is invented: unset items are absent"
+    put = lambda k, lang, v: db.execute("INSERT OR REPLACE INTO site_config (key, lang, value, updated_at) VALUES (?,?,?,'now')", (k, lang, v))
+    put("darshan_timings", "en", "Set by the office"); put("darshan_timings", "te", "TODO"); put("directions", "en", "TODO: fill in"); put("seva_timings", "en", "English seva")
+    put("seva_timings", "hi", "Hindi seva"); put("not_a_key", "en", "ignored"); db.commit()
+    site = lambda lang: call("GET", "/api/public/info", dict(lang=lang))[1]["site"]
+    assert site("en") == {"darshan_timings": "Set by the office", "seva_timings": "English seva"}, site("en")  # TODO and unknown keys never reach guests
+    assert site("te")["darshan_timings"] == "Set by the office", "a TODO translation falls back to English"
+    assert site("hi")["seva_timings"] == "Hindi seva" and site("xx") == site("en")
+    db.execute("DELETE FROM site_config"); db.commit(); db.close()
+
+
+def test_policy_and_content():
+    # money: refunds round half up to the paisa, never exceed what was paid, and are 0 when no policy is set
+    assert m.refund_for(1000, 50) == 500 and m.refund_for(999, 33) == 329.67 and m.refund_for(1000, 100) == 1000
+    assert m.refund_for(0.05, 50) == 0.03 and m.refund_for(1000, 0) == 0 and m.refund_for(1000, None) == 0 and m.refund_for(0, 100) == 0 and m.refund_for(None, 100) == 0
+    call("GET", "/health", {})
+    db = sqlite3.connect(m.DB)
+    cfg = lambda: call("GET", "/api/public/info")[1]["settings"]
+    assert cfg()["refund_percent"] is None and cfg()["refund_days"] is None, "no refund policy is assumed"
+    db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('refund_percent', '50'), ('refund_days', '7')"); db.commit()
+    assert (cfg()["refund_percent"], cfg()["refund_days"]) == (50, 7)
+
+    # the cutoff the page shows is the one enforced; the booking carries the same refund values; refund = paid x percent
+    pid, t = pick()
+    st, b = call("POST", "/api/public/book", guest(property_id=pid, room_type_id=t["room_type_id"]))
+    assert st == 200 and b["refund"] == {"percent": 50, "days": 7, "amount": 0}, b  # nothing is paid online, so nothing to refund
+    cutoff = cfg()["guest_cancel_cutoff_hours"]
+    assert datetime.fromisoformat(b["cancel_deadline"]) == datetime.fromisoformat(f"{CI}T{cfg()['checkin_time']}") - timedelta(hours=cutoff)
+    db.execute("UPDATE bookings SET payment_status = 'paid' WHERE id = ? OR group_id = ?", (b["booking_id"], b["booking_id"])); db.commit()
+    v = call("POST", "/api/public/booking/lookup", dict(booking_id=b["booking_id"], phone=b["mobile"]))[1]
+    assert v["refund"]["amount"] == v["amount"] / 2, v
+    st, c = call("POST", "/api/public/booking/cancel", dict(booking_id=b["booking_id"], phone=b["mobile"], reason="plans changed"))
+    assert st == 200 and c["status"] == "Cancelled" and c["refund"]["amount"] == v["amount"] / 2
+    assert db.execute("SELECT COUNT(*) FROM audit_log WHERE action = 'booking.online_cancel' AND reason LIKE '%refund policy 50%'").fetchone()[0] == 1
+    db.execute("DELETE FROM settings WHERE key IN ('refund_percent', 'refund_days')"); db.commit()
+    assert cfg()["refund_percent"] is None
+
+    # site items are checked by kind; a bad value written straight to the database is still not served
+    bad = [("rooms_phone", "abc"), ("whatsapp_number", "12345"), ("support_email", "x"), ("map_url", "http://x.example"), ("official_site_url", "javascript:alert(1)"),
+           ("map_embed_url", "https://evil.example/maps/embed"), ("map_embed_url", "https://www.google.com/maps/embed?x=1 onload=1")]
+    for k, v in bad:
+        try:
+            m.site_check(k, v)
+        except m.UserError:
+            continue
+        raise AssertionError((k, v))
+    for k, v in [("rooms_phone", "+91 98765-43210"), ("whatsapp_number", "+91 98765 43210"), ("support_email", "a@b.in"), ("map_url", "https://maps.example/x"),
+                 ("map_embed_url", "https://www.google.com/maps/embed?pb=abc"), ("map_embed_url", "https://www.openstreetmap.org/export/embed.html?bbox=1")]:
+        m.site_check(k, v)
+    db.execute("DELETE FROM site_config")
+    db.execute("INSERT INTO site_config (key, lang, value, updated_at) VALUES ('map_embed_url', 'en', 'https://evil.example/x', 'now'), ('rooms_phone', 'en', 'abc', 'now'), ('map_url', 'en', 'https://maps.example/x', 'now')"); db.commit()
+    assert call("GET", "/api/public/info")[1]["site"] == {"map_url": "https://maps.example/x"}
+    db.execute("DELETE FROM site_config"); db.commit()
+
+    # FAQ: TODO answers and inactive drafts are hidden, a translation is used only when complete, order follows position
+    db.execute("DELETE FROM faq_text"); db.execute("DELETE FROM faqs")
+    for fid, pos, active, texts in [(1, 2, 1, {"en": ("Q1", "A1"), "te": ("Q1te", "A1te")}), (2, 1, 1, {"en": ("Q2", "TODO")}), (3, 3, 0, {"en": ("Q3", "A3")}),
+                                    (4, 4, 1, {"en": ("Q4", "A4"), "hi": ("Q4hi", "TODO")})]:
+        db.execute("INSERT INTO faqs (id, position, active) VALUES (?,?,?)", (fid, pos, active))
+        db.executemany("INSERT INTO faq_text (faq_id, lang, question, answer) VALUES (?,?,?,?)", [(fid, lang, q, a) for lang, (q, a) in texts.items()])
+    db.commit()
+    qs = lambda lang: [x["question"] for x in call("GET", "/api/public/info", dict(lang=lang))[1]["faqs"]]
+    assert qs("en") == ["Q1", "Q4"] and qs("te") == ["Q1te", "Q4"] and qs("hi") == ["Q1", "Q4"] and qs("xx") == ["Q1", "Q4"], (qs("en"), qs("te"), qs("hi"))
+
+    # seeding: call-back notes become inactive drafts with a TODO answer, once each
+    db.execute("DELETE FROM faq_text"); db.execute("DELETE FROM faqs")
+    for note in ("Need ground floor", "Need ground floor", "   ", None):
+        db.execute("INSERT INTO callback_requests (name, phone, people, check_in, check_out, note, created_at) VALUES ('T', '9876543210', 5, ?, ?, ?, 'now')", (CI, CO, note))
+    db.commit()
+    assert m.seed_faqs_from_callbacks(db) == 1 and m.seed_faqs_from_callbacks(db) == 0
+    assert db.execute("SELECT f.active, x.question, x.answer FROM faqs f JOIN faq_text x ON x.faq_id = f.id").fetchall() == [(0, "Need ground floor", "TODO")]
+    db.commit()  # the throttle counters live in the same database: do not hold its write lock
+    assert call("GET", "/api/public/info")[1]["faqs"] == []
+    db.execute("DELETE FROM faq_text"); db.execute("DELETE FROM faqs"); db.execute("DELETE FROM callback_requests WHERE name = 'T'"); db.commit(); db.close()
+
+
+def test_quick_callback():
+    """The Call me back button sends only a name and phone (plus best time and language): it uses the same queue, with no people or dates."""
+    call("GET", "/health", {})
+    db = sqlite3.connect(m.DB)
+    n0 = db.execute("SELECT COUNT(*) FROM callback_requests").fetchone()[0]
+    quick = dict(name="Elder Guest", phone="9876500077", call_time="evening", lang="te")
+    st, r = call("POST", "/api/public/callback", quick)
+    assert st == 200 and r == {"ok": True}, r
+    row = db.execute("SELECT name, phone, people, check_in, check_out, status, call_time, lang FROM callback_requests ORDER BY id DESC LIMIT 1").fetchone()
+    assert row == ("Elder Guest", "9876500077", None, None, None, "new", "evening", "te"), row
+    assert db.execute("SELECT COUNT(*) FROM audit_log WHERE action = 'callback.request' AND new_value LIKE '%quick call-back, evening, te%'").fetchone()[0] == 1
+    # defaults, language is optional and unknown languages are ignored, call time is checked
+    assert call("POST", "/api/public/callback", dict(name="A", phone="9876500078"))[0] == 200
+    assert call("POST", "/api/public/callback", dict(name="B", phone="9876500079", lang="xx"))[0] == 200
+    assert db.execute("SELECT call_time, lang FROM callback_requests WHERE name IN ('A', 'B') ORDER BY name").fetchall() == [("any", None), ("any", None)]
+    assert call("POST", "/api/public/callback", quick | dict(call_time="midnight"))[0] == 400
+    # the same checks as the long form: name, phone, honeypot, and a half-filled booking request is not a quick one
+    for patch in (dict(name=""), dict(phone="12"), dict(website="x"), dict(check_in=D(40)), dict(people=3), dict(note="x" * 501)):
+        assert call("POST", "/api/public/callback", quick | patch)[0] == 400, patch
+    assert db.execute("SELECT COUNT(*) FROM callback_requests").fetchone()[0] == n0 + 3
+    # per-number throttle still applies
+    m.reset_throttle()
+    codes = [m.dispatch("POST", "/api/public/callback", None, dict(name="T", phone="9876500099"), f"9.9.9.{i}")[0] for i in range(5)]
+    assert codes == [200, 200, 200, 429, 429], codes
+    db.execute("DELETE FROM callback_requests WHERE name IN ('Elder Guest', 'A', 'B', 'T')"); db.commit(); db.close()
+
+
+def test_callback_table_migration():
+    """An old callback_requests table (people and dates required) is rebuilt with every row kept, and then accepts empty people and dates."""
+    path = TMP / "old.db"
+    shutil.copy(m.DB, path)
+    c = sqlite3.connect(path, isolation_level=None)
+    c.execute("DROP TABLE callback_requests")
+    c.execute("CREATE TABLE callback_requests (id INTEGER PRIMARY KEY, property_id INTEGER REFERENCES properties(id), name TEXT NOT NULL, phone TEXT NOT NULL, people INTEGER NOT NULL, "
+              "check_in TEXT NOT NULL, check_out TEXT NOT NULL, note TEXT, status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'contacted', 'closed')), created_at TEXT NOT NULL, "
+              "handled_by INTEGER REFERENCES users(id), handled_at TEXT)")
+    c.execute("INSERT INTO callback_requests VALUES (7, 1, 'Old Row', '9876500001', 12, '2027-01-01', '2027-01-03', 'a note', 'contacted', '2026-10-01T10:00:00', 1, '2026-10-02T09:00:00')")
+    c.execute("CREATE INDEX idx_callbacks_status ON callback_requests(status, created_at)")
+    m.write(c, lambda: m.migrate(c))
+    assert c.execute("SELECT * FROM callback_requests").fetchall() == [(7, 1, "Old Row", "9876500001", 12, "2027-01-01", "2027-01-03", "a note", "contacted", "2026-10-01T10:00:00", 1, "2026-10-02T09:00:00", None, None, None)]
+    c.execute("INSERT INTO callback_requests (name, phone, created_at, call_time, lang) VALUES ('Quick', '9876500002', 'now', 'any', 'hi')")  # no people or dates
+    assert c.execute("SELECT name FROM sqlite_master WHERE name = 'callback_requests_old'").fetchone() is None
+    m.write(c, lambda: m.migrate(c))  # running it again changes nothing
+    assert c.execute("SELECT COUNT(*) FROM callback_requests").fetchone()[0] == 2
+    c.close()
+
+
 if __name__ == "__main__":
     try:
+        test_callback_table_migration()
+        test_site_config()
+        test_policy_and_content()
         test_health_and_backup()
         test_alternatives()
         test_callback()
+        test_quick_callback()  # after test_callback, which counts the audit rows (the audit log is append-only)
         test_arrival_details()
         test_holds_and_limits()
         test_peak_periods()

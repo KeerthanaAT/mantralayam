@@ -5,3 +5,17 @@ token.json
 __pycache__/
 
 backups/
+uploads/
+
+# secrets, databases, backups and logs never go into git
+.env.*
+!.env.example
+*.db
+*.db-journal
+*.db-wal
+*.sqlite*
+*.log
+.tmp_*
+*.pem
+*.key
+service-account*.json

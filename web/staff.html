@@ -115,8 +115,10 @@
 </dialog>
 
 <noscript><p style="padding:2rem">The staff app needs JavaScript.</p></noscript>
-<script>
+<script nonce="__NONCE__">
 "use strict";
+// replaceChildren would print the word "null" for an empty slot and "a,b" for an array: skip empty values and flatten lists
+{ const rc = Element.prototype.replaceChildren; Element.prototype.replaceChildren = function (...k) { return rc.apply(this, k.flat(2).filter((x) => x != null && x !== false)); }; }
 const $ = (s, r = document) => r.querySelector(s);
 const dateFmt = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric" });
 const fmtDate = (s) => (s ? dateFmt.format(new Date(s + "T00:00:00")) : "");
@@ -143,9 +145,11 @@ const ROOM_LABEL = { available: "Available", booked: "Booked", occupied: "Occupi
 const KIND_LABEL = { internal_block: "Blocked", maintenance: "Maintenance", out_of_service: "Out of service", cleaning_required: "Needs cleaning", in_cleaning: "Being cleaned" };
 
 function toast(msg) { $("#toast").replaceChildren(h("div", { class: "t" }, msg)); clearTimeout(toast.id); toast.id = setTimeout(() => $("#toast").replaceChildren(), 6000); }
+let CSRF = "";  // the CSRF token of this sign-in: sent with every POST so another site cannot act for the signed-in user
 async function api(path, body) {
-  const res = await fetch(path, { method: body === undefined ? "GET" : "POST", headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const res = await fetch(path, { method: body === undefined ? "GET" : "POST", headers: { "Content-Type": "application/json", ...(body === undefined ? {} : { "X-CSRF-Token": CSRF }) }, body: body === undefined ? undefined : JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
+  if (data && data.csrf) CSRF = data.csrf;
   if (res.status === 401 && S.meta) { S.meta = null; route(); }
   if (!res.ok) throw new Error(data.error || "Something went wrong. Please try again.");
   return data;
@@ -157,9 +161,46 @@ const opt = (v, l, sel) => h("option", { value: v, selected: String(v) === Strin
 const can = (k) => S.meta.can[k];
 
 // ---------- chrome, routing ----------
-const VIEWS = { today: ["Today", todayView], rooms: ["Rooms", roomsView], bookings: ["Bookings", bookingsView], callbacks: ["Call-backs", callbacksView], status: ["Room status", statusView], audit: ["Audit log", auditView], admin: ["Admin", adminView] };
-const GATE = { audit: "audit", admin: "admin" };
-const allowed = (k) => k === "callbacks" ? S.meta.pages.some((p) => p.key === k) : !GATE[k] || can(GATE[k]);  // the server decides who sees Call-backs
+const VIEWS = { today: ["Today", todayView], desk: ["Front desk", deskView], bookings: ["Bookings", bookingsView], callbacks: ["Call-backs", callbacksView], calendar: ["Calendar", calendarView], rooms: ["Rooms", roomsView],
+  housekeeping: ["Housekeeping", housekeepingView], status: ["Room status", statusView], payments: ["Payments", paymentsView], messages: ["Messages", messagesView], notices: ["Notices", noticesView], feedback: ["Feedback", feedbackView], broadcasts: ["Broadcasts", broadcastsView], reports: ["Reports", reportsView], audit: ["Audit log", auditView], admin: ["Admin", adminView], settings: ["Account security", accountView] };
+
+async function accountView(root) {
+  const t = S.meta.totp, err = h("p", { class: "msg error", role: "alert", hidden: true }), setup = h("div");
+  const show = (x) => { err.textContent = x.message; err.hidden = false; };
+  const pw = h("form", { class: "card", "aria-label": "Change password", style: "display:grid;gap:1rem;max-width:30rem" }, h("h2", null, "Change password"),
+    h("div", null, h("label", { for: "pw_cur", class: "req" }, "Current password"), h("input", { id: "pw_cur", type: "password", required: true, autocomplete: "current-password" })),
+    h("div", null, h("label", { for: "pw_new", class: "req" }, "New password"), h("input", { id: "pw_new", type: "password", required: true, minlength: 10, maxlength: 200, autocomplete: "new-password" }), h("p", { class: "hint" }, "At least 10 characters. Other devices are signed out.")),
+    h("button", { class: "btn", type: "submit" }, "Change password"));
+  pw.addEventListener("submit", async (e) => {
+    e.preventDefault(); err.hidden = true;
+    try { await api("/api/me/password", { current: $("#pw_cur").value, new: $("#pw_new").value }); pw.reset(); toast("Password changed."); } catch (x) { show(x); }
+  });
+  const twofa = h("section", { class: "card", style: "max-width:30rem;display:grid;gap:1rem" }, h("h2", null, "Two-factor sign-in"));
+  if (!t.applies) twofa.append(h("p", { class: "muted" }, "Two-factor sign-in is for managers and super admins."));
+  else if (t.enabled) twofa.append(h("p", null, "On. You sign in with your password and a code from your authenticator app. If you lose your phone, a super admin can reset it (or run: python tools/mantralayam_staff.py reset-totp USERNAME)."));
+  else {
+    if (t.required) twofa.append(h("p", { class: "msg error", role: "alert" }, "Your role must use two-factor sign-in. Set it up now to continue."));
+    twofa.append(h("p", null, "Use an authenticator app (Google Authenticator, Microsoft Authenticator, Aegis, FreeOTP). Enter your password to get a key."));
+    const start = h("form", { style: "display:grid;gap:.5rem" }, h("div", null, h("label", { for: "tp_pw", class: "req" }, "Your password"), h("input", { id: "tp_pw", type: "password", required: true, autocomplete: "current-password" })), h("button", { class: "btn", type: "submit" }, "Get a key"));
+    start.addEventListener("submit", async (e) => {
+      e.preventDefault(); err.hidden = true;
+      try {
+        const r = await api("/api/me/totp/setup", { password: $("#tp_pw").value });
+        const form = h("form", { style: "display:grid;gap:.5rem" }, h("p", null, "In the app choose Add account, then Enter a setup key, and type this key (spaces do not matter):"),
+          h("p", null, h("code", { style: "font-size:1.2rem;word-break:break-all" }, r.secret.match(/.{1,4}/g).join(" "))), h("p", { class: "small" }, h("a", { href: r.uri }, "On the phone with the app: open this link instead")),
+          h("div", null, h("label", { for: "tp_code", class: "req" }, "Code shown in the app"), h("input", { id: "tp_code", inputmode: "numeric", autocomplete: "one-time-code", required: true, maxlength: 7 })), h("button", { class: "btn", type: "submit" }, "Turn on"));
+        form.addEventListener("submit", async (ev) => {
+          ev.preventDefault(); err.hidden = true;
+          try { await api("/api/me/totp/enable", { code: $("#tp_code").value }); S.meta = await api("/api/meta"); toast("Two-factor sign-in is on."); route(); } catch (x) { show(x); }
+        });
+        start.replaceWith(form); $("#tp_code").focus();
+      } catch (x) { show(x); }
+    });
+    twofa.append(start);
+  }
+  root.replaceChildren(h("h1", null, "Account security"), err, h("div", { style: "display:grid;gap:1rem" }, twofa, pw));
+}
+const allowed = (k) => S.meta.pages.some((p) => p.key === k);  // the server lists the pages each role may open, and enforces it on every route
 function chrome() {
   $("#chrome").hidden = !S.meta;
   if (!S.meta) return;
@@ -176,6 +217,7 @@ async function route() {
   if (!S.meta) { try { S.meta = await api("/api/meta"); } catch { chrome(); return loginView(root); } }
   chrome();
   const name = location.hash.replace(/^#\/?/, "").split("/")[0] || "today";
+  if (S.meta.totp && S.meta.totp.required && name !== "settings") { location.hash = "#/settings"; return; }  // managers and super admins set up two-factor sign-in before anything else
   const [label, fn] = VIEWS[name] && allowed(name) ? VIEWS[name] : VIEWS.today;
   document.title = label + " · Mantralayam Staff";
   root.replaceChildren(loading());
@@ -191,11 +233,16 @@ function loginView(root) {
   const f = h("form", { class: "card", "aria-label": "Staff sign in" },
     h("div", null, h("label", { for: "u", class: "req" }, "Username"), h("input", { id: "u", name: "username", required: true, autocomplete: "username", autocapitalize: "none" })),
     h("div", null, h("label", { for: "p", class: "req" }, "Password"), h("input", { id: "p", name: "password", type: "password", required: true, autocomplete: "current-password" })),
+    h("div", { id: "codebox", hidden: true }, h("label", { for: "tc", class: "req" }, "Code from your authenticator app"), h("input", { id: "tc", name: "totp", inputmode: "numeric", autocomplete: "one-time-code", maxlength: 7, pattern: "[0-9 ]*" })),
     err, h("button", { class: "btn", type: "submit" }, "Sign in"));
   f.addEventListener("submit", async (e) => {
     e.preventDefault(); err.hidden = true;
-    try { S.meta = await api("/api/login", Object.fromEntries(new FormData(f))); route(); }
-    catch (x) { err.textContent = x.message; err.hidden = false; $("#p").value = ""; $("#p").focus(); }
+    try {
+      const r = await api("/api/login", Object.fromEntries(new FormData(f)));
+      if (r.need_totp) { $("#codebox").hidden = false; $("#tc").required = true; $("#tc").focus(); return; }  // the password was right: now the code
+      S.meta = r; route();
+    }
+    catch (x) { err.textContent = x.message; err.hidden = false; $("#p").value = ""; if ($("#tc")) $("#tc").value = ""; $("#codebox").hidden = true; $("#tc").required = false; $("#p").focus(); }
   });
   root.replaceChildren(h("div", { class: "login" }, h("h1", null, "Staff sign in"), h("p", { class: "muted" }, "For property staff only. Guests book at the main website."), f));
   $("#u").focus();
@@ -213,8 +260,11 @@ function bookingTable(rows, caption, empty) {
       h("td", null, b.room, h("div", { class: "small muted" }, b.property)),
       h("td", null, fmtDate(b.check_in), " to ", fmtDate(b.check_out), b.arrival_time ? h("div", { class: "small" }, "Arrives about " + b.arrival_time) : null,
         b.darshan_date ? h("div", { class: "small" }, "Darshan " + fmtDate(b.darshan_date)) : null, b.remarks ? h("div", { class: "small muted" }, "Remarks: " + b.remarks) : null,
-        b.cancel_reason ? h("div", { class: "small muted" }, "Reason: " + b.cancel_reason) : null),
-      h("td", null, b.guests),
+        b.cancel_reason ? h("div", { class: "small muted" }, "Reason: " + b.cancel_reason) : null,
+        b.booker_name ? h("div", { class: "small" }, "Booked by " + b.booker_name) : null,
+        b.arrival_contact_name || b.arrival_contact_phone ? h("div", { class: "small" }, "Call on arrival: " + [b.arrival_contact_name, b.arrival_contact_phone].filter(Boolean).join(" · ")) : null,
+        b.promo_code || b.discount_amount ? h("div", { class: "small muted" }, "Discount: " + (b.promo_code && !b.promo_code.startsWith("auto:") ? b.promo_code + " " : "group rate ") + inr.format(b.discount_amount || 0)) : null),
+      h("td", null, b.guests, b.children ? h("div", { class: "small muted" }, b.children + " child" + (b.children > 1 ? "ren" : "")) : null, b.extra_beds ? h("div", { class: "small muted" }, b.extra_beds + " extra bed" + (b.extra_beds > 1 ? "s" : "")) : null),
       h("td", null, badge(STATUS_CLASS[b.status] || "neutral", b.status)),
       h("td", { class: "actions" }, can("book") ? bookingActions(b, today) : null))))));
 }
@@ -234,13 +284,15 @@ async function act(b, action, done, body) {
 }
 
 // ---------- views ----------
+const alertBanner = (list) => list && list.length ? h("div", { class: "msg error", role: "alert" }, h("strong", null, list.length === 1 ? "Needs attention" : `${list.length} things need attention`),
+  h("ul", { class: "plain", style: "margin:.5rem 0 0 1.25rem" }, list.map((a) => h("li", null, a.message, a.emailed_at ? null : h("div", { class: "small muted" }, "Not emailed: " + (a.email_note || "email pending")))))) : null;
 const backupLine = (b) => h("p", { class: "small " + (b && !b.ok ? "msg error" : "muted"), role: b && !b.ok ? "alert" : null },
   b ? ["Last backup: ", fmtWhen(b.ts), " ", h("strong", null, b.ok ? "OK" : "FAILED"), b.ok ? null : " (" + b.detail + ")"] : "Last backup: none yet. Run the backup command (see workflows/mantralayam_staff.md).");
 async function todayView(root) {
   const load = async () => {
     const d = await api("/api/dashboard?" + qs({ property_id: S.prop }));
     const card = (n, l, warn) => h("li", { class: warn && n ? "warn" : "" }, h("strong", null, n), h("span", null, l));
-    out.replaceChildren(...["backup" in d ? backupLine(d.backup) : null,
+    out.replaceChildren(...[alertBanner(d.alerts), "backup" in d ? backupLine(d.backup) : null,
       h("ul", { class: "counts", "aria-label": "Today at a glance" }, card(d.arrivals.length, "Arrivals today"), card(d.overdue.length, "Late arrivals to resolve", true),
         card(d.inhouse.length + d.due_out.length, "Guests in house"), card(d.due_out.length, "Due out", true), card(`${d.rooms.available || 0} of ${d.total_rooms}`, "Rooms available now")),
       ...[d.overdue.length ? bookingTable(d.overdue, "Late arrivals (check-in date has passed)", "") : null,
@@ -292,33 +344,361 @@ async function bookingsView(root) {
   await load();
 }
 
-const CB_CLASS = { new: "booked", contacted: "occupied", closed: "neutral" };
+// ---------- call-backs: status workflow, follow-up date, notes with time and name ----------
+const CB_CLASS = { new: "booked", contacted: "occupied", follow_up: "maintenance", closed: "neutral" };
+const CB_LABEL = { new: "New", contacted: "Contacted", follow_up: "Follow-up", closed: "Closed" };
+const CB_VERB = { contacted: "Mark contacted", follow_up: "Follow up later", closed: "Close" };
 async function callbacksView(root) {
   const out = h("div", null);
-  const setStatus = async (r, status, done) => {
-    try { await api(`/api/callbacks/${r.id}/status`, { status }); toast(`Call-back from ${r.name}: ${done}`); await load(); } catch (e) { toast(e.message); }
+  const reload = () => load().catch((x) => out.replaceChildren(fail(x, reload)));
+  const change = (r, status) => {
+    const fields = [{ name: "note", label: status === "closed" ? "How did it end? (required)" : r.status === "closed" ? "Why is it reopened? (required)" : "Note (optional)", type: "textarea", max: 500, req: status === "closed" || r.status === "closed" }];
+    if (status === "follow_up") fields.unshift({ name: "follow_up_on", label: "Call again on", type: "date", req: true, min: S.meta.today, hi: addDay(S.meta.today, 90) });
+    editDialog(`${CB_VERB[status] || CB_LABEL[status]}: ${r.name}`, fields, { follow_up_on: addDay(S.meta.today, 1) }, (b) => api(`/api/callbacks/${r.id}/status`, { status, ...b }), reload);
   };
+  const addNote = (r) => editDialog(`Add a note: ${r.name}`, [{ name: "note", label: "Note", type: "textarea", max: 500, req: true }], {}, (b) => api(`/api/callbacks/${r.id}/note`, b), reload);
   const load = async () => {
     out.replaceChildren(loading());
-    const rows = await api("/api/callbacks?" + qs({ property_id: S.prop, status: S.cbstatus }));
+    const rows = await api("/api/callbacks?" + qs({ property_id: S.prop, status: S.cbstatus === "due" ? "" : S.cbstatus, due: S.cbstatus === "due" ? "1" : "" }));
     const btn = (r, label, cls, fn) => h("button", { class: "btn small " + cls, type: "button", "aria-label": `${label}: call-back from ${r.name}`, onclick: fn }, label);
+    const notes = (r) => r.notes.length ? h("details", { class: "small" }, h("summary", null, `Notes and history (${r.notes.length})`),
+      h("ol", { class: "plain notes" }, r.notes.map((n) => h("li", null, h("strong", null, n.user_name), " · ", fmtWhen(n.created_at), n.status_to ? h("span", null, " · ", badge(CB_CLASS[n.status_to], CB_LABEL[n.status_to])) : null, n.note ? h("div", null, n.note) : null)))) : null;
     out.replaceChildren(rows.length ? h("div", { class: "scroll", role: "region", "aria-label": "Call-back requests", tabindex: "0" }, h("table", null, h("caption", null, `Call-back requests (${rows.length})`),
-      h("thead", null, h("tr", null, ["Received", "Who", "People", "Preferred dates", "Property", "Status", "Actions"].map((t) => h("th", { scope: "col" }, t)))),
+      h("thead", null, h("tr", null, ["Received", "Who", "People", "Preferred dates and call time", "Property", "Status", "Actions"].map((t) => h("th", { scope: "col" }, t)))),
       h("tbody", null, rows.map((r) => h("tr", null,
         h("td", null, fmtWhen(r.created_at)),
-        h("td", null, h("strong", null, r.name), h("div", { class: "small" }, h("a", { href: "tel:" + r.phone }, r.phone)), r.note ? h("div", { class: "small muted" }, "Note: " + r.note) : null),
-        h("td", null, r.people),
-        h("td", null, fmtDate(r.check_in), " to ", fmtDate(r.check_out)),
+        h("td", null, h("strong", null, r.name), h("div", { class: "small" }, h("a", { href: "tel:" + r.phone }, r.phone)), r.note ? h("div", { class: "small muted" }, "Note: " + r.note) : null, notes(r)),
+        h("td", null, r.people ?? "Not given"),
+        h("td", null, r.check_in ? [fmtDate(r.check_in), " to ", fmtDate(r.check_out)] : "Not given (quick call-back)",
+          r.call_time && r.call_time !== "any" ? h("div", { class: "small muted" }, "Best time: " + r.call_time) : null, r.lang ? h("div", { class: "small muted" }, "Language: " + ({ en: "English", te: "Telugu", kn: "Kannada", ta: "Tamil", hi: "Hindi" }[r.lang] || r.lang)) : null),
         h("td", null, r.property || "Any property"),
-        h("td", null, badge(CB_CLASS[r.status], r.status[0].toUpperCase() + r.status.slice(1)), r.handled_by_name ? h("div", { class: "small muted" }, `${r.handled_by_name}, ${fmtWhen(r.handled_at)}`) : null),
-        h("td", { class: "actions" }, can("book") && r.status !== "closed" ? [
-          r.status === "new" ? btn(r, "Mark contacted", "secondary", () => setStatus(r, "contacted", "marked contacted.")) : null,
-          btn(r, "Close", "secondary", () => setStatus(r, "closed", "closed.")),
-          btn(r, "Book rooms", "", () => openBook(null, r))] : null)))))) : h("p", { class: "empty card" }, "No call-back requests match."));
+        h("td", null, badge(CB_CLASS[r.status], CB_LABEL[r.status]), r.status === "follow_up" ? h("div", { class: "small " + (r.overdue ? "bad" : "muted") }, (r.overdue ? "Overdue: " : "Call on ") + fmtDate(r.follow_up_on)) : null,
+          r.handled_by_name ? h("div", { class: "small muted" }, `${r.handled_by_name}, ${fmtWhen(r.handled_at)}`) : null),
+        h("td", { class: "actions" }, can("callbacks") ? [...r.next.map((n) => btn(r, r.status === "closed" ? "Reopen" : CB_VERB[n], n === "closed" ? "secondary" : "secondary", () => change(r, n))), btn(r, "Add note", "secondary", () => addNote(r)),
+          r.status !== "closed" && can("book") ? btn(r, "Book rooms", "", () => openBook(null, r)) : null] : null)))))) : h("p", { class: "empty card" }, "No call-back requests match."));
   };
-  root.replaceChildren(h("h1", null, "Call-backs"), h("div", { class: "toolbar" }, propSelect(() => load().catch((e) => out.replaceChildren(fail(e, load)))),
-    h("div", null, h("label", { for: "f_cbs" }, "Status"), h("select", { id: "f_cbs", onchange: (e) => { S.cbstatus = e.target.value; load().catch((x) => out.replaceChildren(fail(x, load))); } },
-      opt("", "All", S.cbstatus), opt("new", "New", S.cbstatus), opt("contacted", "Contacted", S.cbstatus), opt("closed", "Closed", S.cbstatus)))), out);
+  root.replaceChildren(h("h1", null, "Call-backs"), h("div", { class: "toolbar" }, propSelect(reload),
+    h("div", null, h("label", { for: "f_cbs" }, "Show"), h("select", { id: "f_cbs", onchange: (e) => { S.cbstatus = e.target.value; reload(); } },
+      opt("", "All", S.cbstatus), opt("new", "New", S.cbstatus), opt("contacted", "Contacted", S.cbstatus), opt("follow_up", "Follow-up", S.cbstatus), opt("due", "Follow-ups due now", S.cbstatus), opt("closed", "Closed", S.cbstatus)))), out);
+  await load();
+}
+
+// ---------- front desk: scan the guest's QR code (or type the booking ID), record the ID, take payment, check in ----------
+const MONEY = (p) => inr.format(p / 100);
+async function deskView(root) {
+  const result = h("div", { "aria-live": "polite" });
+  const code = h("input", { id: "d_code", name: "code", autocomplete: "off", autocapitalize: "off", spellcheck: "false", placeholder: "MR1.… or booking ID", maxlength: 80, "aria-describedby": "d_hint" });
+  const video = h("video", { id: "d_video", playsinline: true, muted: true, hidden: true, style: "width:100%;max-width:24rem;border-radius:var(--r-card)", "aria-label": "Camera view for scanning the QR code" });
+  let stream = null, timer = null;
+  const stopScan = () => { clearInterval(timer); if (stream) stream.getTracks().forEach((t) => t.stop()); stream = null; video.hidden = true; scanBtn.textContent = "Scan with camera"; };
+  const lookup = async (c) => {
+    result.replaceChildren(loading());
+    try { show(await api("/api/checkin/lookup?" + qs({ code: c }))); } catch (e) { result.replaceChildren(h("p", { class: "msg error", role: "alert" }, e.message)); }
+  };
+  const scanBtn = h("button", { class: "btn secondary", type: "button", onclick: async () => {
+    if (stream) return stopScan();
+    try {
+      const det = new BarcodeDetector({ formats: ["qr_code"] });
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      video.srcObject = stream; video.hidden = false; await video.play(); scanBtn.textContent = "Stop camera";
+      timer = setInterval(async () => { try { const f = await det.detect(video); if (f.length) { code.value = f[0].rawValue; stopScan(); lookup(code.value); } } catch {} }, 300);
+    } catch { stopScan(); toast("The camera could not be started. Type the booking ID, or use a handheld scanner in the box."); }
+  } }, "Scan with camera");
+  const form = h("form", { class: "toolbar", role: "search" }, h("div", { class: "grow" }, h("label", { for: "d_code" }, "Booking QR code or booking ID"), code, h("p", { class: "hint", id: "d_hint" }, "A handheld scanner types the code here. Or tap the camera button.")),
+    h("button", { class: "btn", type: "submit" }, "Look up"), "BarcodeDetector" in window && navigator.mediaDevices ? scanBtn : null);
+  form.addEventListener("submit", (e) => { e.preventDefault(); stopScan(); if (code.value.trim()) lookup(code.value.trim()); });
+  const again = () => lookup(S.deskCode);
+  function show(d) {
+    S.deskCode = String(d.booking_id);
+    const live = d.rows.filter((r) => r.status !== "Cancelled"), first = d.rows[0], mo = d.money;
+    const stat = (r) => badge(STATUS_CLASS[r.status] || "neutral", r.status);
+    const idLine = (r) => r.id_record && r.id_record.has_number ? [badge("available", "ID recorded"), ` ${r.id_record.id_type} ····${r.id_record.last4 || ""}`, h("div", { class: "small muted" }, `${r.id_record.captured_by || ""}, ${fmtWhen(r.id_record.captured_at)}`, r.id_record.has_image ? " · photo stored" : "")]
+      : r.id_record && r.id_record.purged ? "ID erased (retention)" : [badge("blocked", "No ID yet"), ` Given at booking: ${r.id_type} ${r.id_tail}`];
+    const room = (r) => {
+      const go = (verb, label, body) => h("button", { class: "btn small", type: "button", "aria-label": `${label} room ${r.room}`, onclick: async () => { try { await api(`/api/bookings/${r.id}/${verb}`, body || {}); toast(`Room ${r.room}: ${label.toLowerCase()} done.`); again(); } catch (e) { toast(e.message); } } }, label);
+      return h("tr", null, h("td", null, h("strong", null, r.room), h("div", { class: "small muted" }, r.property)), h("td", null, r.guest_name, h("div", { class: "small muted" }, `${r.guests} guest${r.guests > 1 ? "s" : ""}`)), h("td", null, fmtDate(r.check_in), " to ", fmtDate(r.check_out)), h("td", null, stat(r)), h("td", null, idLine(r)),
+        h("td", { class: "actions" }, r.status === "Confirmed" ? go("checkin", "Check in") : null, r.status === "Checked-In" ? go("checkout", "Check out") : null));
+    };
+    const needsId = live.some((r) => !(r.id_record && r.id_record.has_number));
+    const idBox = live.length ? h("section", { class: "card", "aria-label": "Guest ID" }, h("h2", null, "Guest ID"),
+      d.requires_id ? h("p", { class: "hint" }, "Check-in needs the ID recorded first. It is stored encrypted; staff see only the last four characters afterwards.") : null,
+      h("div", { class: "toolbar" }, h("div", null, h("label", { for: "d_idt" }, "ID type"), h("select", { id: "d_idt" }, d.id_types.map((t) => opt(t, t, first.id_type)))),
+        h("div", { class: "grow" }, h("label", { for: "d_idn" }, "ID number (as printed on the ID)"), h("input", { id: "d_idn", maxlength: 30, autocomplete: "off" })),
+        h("button", { class: "btn", type: "button", onclick: async () => { try { await api(`/api/bookings/${live[0].id}/id`, { id_type: $("#d_idt").value, id_number: $("#d_idn").value }); toast("ID recorded."); again(); } catch (e) { toast(e.message); } } }, needsId ? "Save ID" : "Replace ID")),
+      h("div", { class: "toolbar" }, h("div", { class: "grow" }, h("label", { for: "d_idp" }, "Photo of the ID (optional)"), h("input", { id: "d_idp", type: "file", accept: "image/*", capture: "environment" })),
+        h("button", { class: "btn secondary", type: "button", onclick: () => uploadIdPhoto(live[0].id, again) }, "Store photo")),
+      can("id_reveal") && !needsId ? h("div", { class: "actions" }, h("button", { class: "btn secondary", type: "button", onclick: () => revealId(live[0].id) }, "Show full ID number (logged)"),
+        live.some((r) => r.id_record && r.id_record.has_image) ? h("button", { class: "btn secondary", type: "button", onclick: () => viewIdPhoto(live[0].id) }, "View ID photo (logged)") : null) : null) : null;
+    const pay = h("section", { class: "card", "aria-label": "Payment" }, h("h2", null, "Payment"),
+      h("dl", { class: "facts" }, [["Booking total", inr.format(d.total)], ["Received", inr.format(mo.paid)], mo.refunded || mo.refund_in_progress ? ["Refunded or refunding", inr.format(mo.refunded + mo.refund_in_progress)] : null,
+        ["Still to collect", inr.format(mo.balance)]].filter(Boolean).flatMap(([k, v]) => [h("dt", null, k), h("dd", null, v)])),
+      d.payments.length ? h("ul", { class: "plain small" }, d.payments.map((p) => h("li", null, `${p.provider === "counter" ? "Counter" : "Online"} ${p.kind}, ${p.method || ""}: ${MONEY(p.amount_paise)} (${p.status}${p.payment_id ? ", …" + p.payment_id : ""})`))) : null,
+      d.refunds.length ? h("ul", { class: "plain small" }, d.refunds.map((r) => h("li", null, `Refund ${MONEY(r.amount_paise)}: ${r.status}`))) : null,
+      can("record_payment") && live.length ? h("div", { class: "actions" }, h("button", { class: "btn secondary", type: "button", onclick: () => editDialog("Record a payment at the counter", [{ name: "amount", label: "Amount received, Rs", type: "number", req: true, min: 1 }, { name: "mode", label: "Paid by", type: "select", options: [["cash", "Cash"], ["upi", "UPI"], ["card", "Card"]] }],
+        { amount: mo.balance || "" }, (b) => api(`/api/bookings/${live[0].id}/payment`, b), again) }, "Record a payment")) : null);
+    result.replaceChildren(h("section", { class: "card", "aria-label": "Booking" }, h("div", { class: "head" }, h("h2", null, `Booking #${d.booking_id}`), d.via === "id" ? h("span", { class: "small muted" }, "Found by typed ID: confirm the guest's name and mobile number") : badge("available", "QR code verified")),
+      h("div", { class: "scroll", role: "region", "aria-label": "Rooms of this booking", tabindex: "0" }, h("table", null, h("thead", null, h("tr", null, ["Room", "Guest", "Stay", "Status", "ID", "Actions"].map((t) => h("th", { scope: "col" }, t)))), h("tbody", null, d.rows.map(room))))), idBox, pay);
+  }
+  root.replaceChildren(h("h1", null, "Front desk"), form, video, result);
+  code.focus();
+  if (S.deskCode) lookup(S.deskCode);
+}
+async function uploadIdPhoto(bid, done) {
+  const f = $("#d_idp").files[0];
+  if (!f) return toast("Choose or take a photo first.");
+  try {
+    const img = await createImageBitmap(f), k = Math.min(1, 1600 / Math.max(img.width, img.height)), cv = document.createElement("canvas");
+    cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k); cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);  // phone photos are shrunk before upload
+    const blob = await new Promise((ok) => cv.toBlob(ok, "image/jpeg", 0.82));
+    const res = await fetch(`/api/bookings/${bid}/id_image`, { method: "POST", headers: { "Content-Type": "image/jpeg", "X-CSRF-Token": CSRF }, body: blob });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "The photo could not be stored.");
+    toast("Photo stored."); done();
+  } catch (e) { toast(e.message || "The photo could not be read."); }
+}
+function revealId(bid) {
+  editDialog("Show the full ID number", [{ name: "reason", label: "Why do you need it? (kept in the audit log)", req: true, max: 200 }], {}, async (b) => {
+    const r = await api(`/api/bookings/${bid}/id_reveal`, b);
+    $("#adlg").addEventListener("close", () => alert(`${r.id_type}: ${r.id_number}\nRecorded by ${r.captured_by || "staff"}, ${fmtWhen(r.captured_at)}`), { once: true });
+  }, () => {});
+}
+function viewIdPhoto(bid) {
+  editDialog("View the ID photo", [{ name: "reason", label: "Why do you need it? (kept in the audit log)", req: true, max: 200 }], {}, async (b) => {
+    const res = await fetch(`/api/bookings/${bid}/id_image?` + qs({ reason: b.reason }));
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "The photo could not be shown.");
+    const url = URL.createObjectURL(await res.blob());
+    const dlg = h("dialog", { "aria-label": "ID photo" }, h("img", { src: url, alt: "Photo of the guest's ID", style: "max-width:100%;max-height:70vh" }), h("div", { class: "foot" }, h("button", { class: "btn", type: "button", onclick: () => dlg.close() }, "Close")));
+    dlg.addEventListener("close", () => { URL.revokeObjectURL(url); dlg.remove(); }); $("#adlg").addEventListener("close", () => { document.body.append(dlg); dlg.showModal(); }, { once: true });
+  }, () => {});
+}
+
+// ---------- housekeeping board: to clean, cleaning, ready, blocked ----------
+const HK_COLS = [["blocked", "Blocked", "blocked"], ["to_clean", "To clean", "maintenance"], ["cleaning", "Being cleaned", "cleaning"], ["ready", "Ready", "available"], ["occupied", "Occupied", "occupied"]];
+async function housekeepingView(root) {
+  const out = h("div", null);
+  const reload = () => load().catch((x) => out.replaceChildren(fail(x, reload)));
+  const post = async (path, ok, body) => { try { await api(path, body || {}); toast(ok); reload(); } catch (x) { toast(x.message); } };
+  const load = async () => {
+    const d = await api("/api/housekeeping?" + qs({ property_id: S.prop }));
+    const btn = (label, fn, cls = "secondary") => h("button", { class: "btn small " + cls, type: "button", onclick: fn }, label);
+    const card = (r) => h("li", { class: "hk-card" + (r.flag ? " warn" : "") }, h("div", { class: "head" }, h("strong", null, "Room " + r.number), h("span", { class: "small muted" }, r.type + (S.meta.properties.length > 1 ? ", " + r.property : ""))),
+      r.guest ? h("div", { class: "small" }, "Guest: " + r.guest) : null, r.reason ? h("div", { class: "small muted" }, (KIND_LABEL[r.kind] || "") + ": " + r.reason + (r.until ? ", until " + fmtDate(r.until) : "")) : null,
+      r.ready_since ? h("div", { class: "small muted" }, "Ready since " + fmtWhen(r.ready_since)) : null,
+      r.arrival ? h("div", { class: "small" + (r.flag ? " bad" : "") }, (r.flag ? "Not ready: " : "") + `${r.arrival.guest} arrives today` + (r.arrival.time ? " at " + r.arrival.time : "")) : null,
+      h("div", { class: "actions" }, can("clean") ? [
+        r.state === "to_clean" ? btn("Start cleaning", () => post(`/api/room_events/${r.event_id}/start_cleaning`, `Room ${r.number}: cleaning started.`)) : null,
+        r.state === "to_clean" || r.state === "cleaning" ? btn("Mark ready", () => post(`/api/room_events/${r.event_id}/release`, `Room ${r.number}: ready for guests.`), "") : null,
+        r.state === "ready" || r.state === "occupied" ? btn("Needs cleaning", () => post(`/api/rooms/${r.id}/needs_cleaning`, `Room ${r.number}: marked for cleaning.`)) : null] : null,
+        r.state === "blocked" && can("status") ? btn("Clear block", () => post(`/api/room_events/${r.event_id}/release`, `Room ${r.number}: available again.`)) : null));
+    out.replaceChildren(h("ul", { class: "counts", "aria-label": "Rooms by state" }, HK_COLS.map(([k, l]) => h("li", { class: k === "to_clean" && d.counts[k] ? "warn" : "" }, h("strong", null, d.counts[k] || 0), h("span", null, l)))),
+      h("div", { class: "hk-cols" }, HK_COLS.map(([k, l, cls]) => h("section", { "aria-label": l }, h("h2", null, badge(cls, l)), h("ul", { class: "plain hk-list" }, d.rooms.filter((r) => r.state === k).map(card)), d.rooms.some((r) => r.state === k) ? null : h("p", { class: "empty small" }, "None")))));
+  };
+  root.replaceChildren(h("div", { class: "head" }, h("h1", null, "Housekeeping"), h("div", { class: "toolbar" }, propSelect(reload), h("button", { class: "btn secondary", type: "button", onclick: reload }, "Refresh"),
+    can("status") ? h("button", { class: "btn", type: "button", onclick: openStatus }, "Block a room or report an issue") : null)), out);
+  await load();
+}
+
+// ---------- calendar: bookings and blocked rooms by day ----------
+S.calStart = ""; S.calDays = 14;
+async function calendarView(root) {
+  const out = h("div", null);
+  const reload = () => load().catch((x) => out.replaceChildren(fail(x, reload)));
+  const load = async () => {
+    const start = S.calStart || S.meta.today;
+    const [cal, ev] = await Promise.all([api("/api/calendar?" + qs({ property_id: S.prop, start, days: S.calDays })), api("/api/room_events?" + qs({ property_id: S.prop }))]);
+    const cellBtn = (r, d, c) => {
+      const label = c ? `${r.number} on ${fmtDate(d)}: ${c.note}${c.reason ? " (" + c.reason + ")" : ""}` : `Room ${r.number} on ${fmtDate(d)}: free`;
+      const blocked = c && c.event_id && !["cleaning"].includes(c.status);
+      return h("td", { class: "cal-td" }, h("button", { type: "button", class: "cal-cell " + (c ? "s-" + c.status : ""), title: label, "aria-label": label,
+        onclick: () => {
+          if (blocked && can("status")) { if (confirm(`Clear this block on room ${r.number}? (${c.note}${c.reason ? ": " + c.reason : ""})`)) api(`/api/room_events/${c.event_id}/release`, {}).then(() => { toast("Block cleared."); reload(); }).catch((x) => toast(x.message)); }
+          else if (!c && can("status")) editDialog(`Block room ${r.number} from ${fmtDate(d)}`, [{ name: "kind", label: "Status", type: "select", options: S.meta.kinds.map((k) => [k, KIND_LABEL[k]]) }, { name: "issue_category", label: "Issue (maintenance only)", type: "select", options: S.meta.issues.map((k) => [k, k]) },
+            { name: "end_date", label: "Available again on", type: "date", min: addDay(d, 1) }, { name: "reason", label: "Reason", req: true, max: 300 }], { end_date: addDay(d, 1) },
+            (b) => api("/api/room_events", { ...b, room_id: r.id, start_date: d, issue_category: b.kind === "internal_block" ? "" : b.issue_category }), reload);
+          else if (c && c.booking_id) { S.q = String(c.booking_id); location.hash = "#/bookings"; }
+        } }, c ? (c.status === "booked" || c.status === "occupied" ? "●" : "▨") : ""));
+    };
+    out.replaceChildren(h("ul", { class: "legend", "aria-label": "Legend" }, [["available", "Free"], ["booked", "Booked"], ["occupied", "Checked in"], ["blocked", "Blocked"], ["maintenance", "Maintenance"], ["out_of_service", "Out of service"], ["cleaning", "Needs cleaning today"]].map(([k, l]) => h("li", null, badge(k, l)))),
+      h("p", { class: "hint" }, can("status") ? "Click a free day to block that room, or a blocked day to clear the block. Booked days open the booking." : "Booked days open the booking."),
+      h("div", { class: "scroll", role: "region", "aria-label": "Calendar", tabindex: "0" }, h("table", { class: "cal" }, h("caption", null, `${fmtDate(cal.days[0])} to ${fmtDate(cal.days[cal.days.length - 1])}`),
+        h("thead", null, h("tr", null, h("th", { scope: "col" }, "Room"), cal.days.map((d) => h("th", { scope: "col", class: "cal-d" }, new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" }))))),
+        h("tbody", null, cal.rooms.map((r) => h("tr", null, h("th", { scope: "row" }, r.number, h("div", { class: "small muted" }, r.type)), r.cells.map((c, i) => cellBtn(r, cal.days[i], c)))))))
+      , ev.filter((e) => e.kind !== "cleaning_required" && e.kind !== "in_cleaning").length ? h("div", { class: "scroll", role: "region", "aria-label": "Blocked rooms", tabindex: "0" }, h("table", null, h("caption", null, "Blocked rooms and maintenance"),
+        h("thead", null, h("tr", null, ["Room", "Status", "Reason", "From", "Until"].map((t) => h("th", { scope: "col" }, t)))),
+        h("tbody", null, ev.filter((e) => e.kind !== "cleaning_required" && e.kind !== "in_cleaning").map((e) => h("tr", null, h("td", null, e.room, h("div", { class: "small muted" }, e.property)), h("td", null, badge(e.kind === "internal_block" ? "blocked" : e.kind, KIND_LABEL[e.kind])), h("td", null, e.reason || ""), h("td", null, fmtDate(e.start_date)), h("td", null, e.end_date ? fmtDate(e.end_date) : "Until cleared")))))) : h("p", { class: "empty card" }, "No room is blocked."));
+  };
+  const shift = (n) => { S.calStart = addDay(S.calStart || S.meta.today, n); route(); };
+  root.replaceChildren(h("div", { class: "head" }, h("h1", null, "Calendar"), h("div", { class: "toolbar" }, propSelect(reload),
+    h("div", null, h("label", { for: "c_start" }, "From"), h("input", { id: "c_start", type: "date", value: S.calStart || S.meta.today, onchange: (e) => { S.calStart = e.target.value; reload(); } })),
+    h("div", null, h("label", { for: "c_days" }, "Days"), h("select", { id: "c_days", onchange: (e) => { S.calDays = +e.target.value; reload(); } }, [7, 14, 21, 28].map((n) => opt(n, n, S.calDays)))),
+    h("button", { class: "btn secondary", type: "button", onclick: () => shift(-S.calDays) }, "Earlier"), h("button", { class: "btn secondary", type: "button", onclick: () => { S.calStart = ""; route(); } }, "Today"), h("button", { class: "btn secondary", type: "button", onclick: () => shift(S.calDays) }, "Later"))), out);
+  await load();
+}
+
+// ---------- payments: reconciliation against bookings, and refund tracking (managers) ----------
+S.payTab = "reconcile"; S.payFrom = ""; S.payTo = "";
+const FLAG = { unpaid: ["maintenance", "Balance due"], overpaid: ["blocked", "Overpaid"], refund_open: ["cleaning", "Refund in progress"], refund_manual: ["blocked", "Refund needs a person"], mismatch: ["blocked", "Money held after cancelling"] };
+async function paymentsView(root) {
+  const out = h("div", null);
+  const reload = () => load().catch((x) => out.replaceChildren(fail(x, reload)));
+  const loadReconcile = async () => {
+    const d = await api("/api/payments/reconcile?" + qs({ property_id: S.prop, start: S.payFrom, end: S.payTo }));
+    S.payFrom = d.start; S.payTo = d.end;
+    const t = d.totals;
+    out.replaceChildren(h("form", { class: "toolbar" }, h("div", null, h("label", { for: "p_from" }, "Check-in from"), h("input", { id: "p_from", type: "date", value: d.start, onchange: (e) => { S.payFrom = e.target.value; reload(); } })),
+        h("div", null, h("label", { for: "p_to" }, "to"), h("input", { id: "p_to", type: "date", value: d.end, onchange: (e) => { S.payTo = e.target.value; reload(); } }))),
+      h("ul", { class: "counts", "aria-label": "Totals" }, [["Received online", t.online], ["Received at the counter", t.counter], ["Refunded", t.refunded], ["Refunds in progress", t.refund_open], ["Still to collect", t.balance]].map(([l, v]) => h("li", { class: l === "Refunds in progress" && v ? "warn" : "" }, h("strong", null, inr.format(v)), h("span", null, l)))),
+      d.rows.length ? h("div", { class: "scroll", role: "region", "aria-label": "Bookings and money", tabindex: "0" }, h("table", null, h("caption", null, `Bookings checking in ${fmtDate(d.start)} to ${fmtDate(d.end)} (${d.rows.length})`),
+        h("thead", null, h("tr", null, ["Booking", "Guest", "Stay", "Status", "Total", "Paid", "Refunded", "Balance", "Flags", ""].map((x) => h("th", { scope: "col" }, x)))),
+        h("tbody", null, d.rows.map((r) => h("tr", null, h("td", null, "#" + r.booking_id, h("div", { class: "small muted" }, r.property)), h("td", null, r.guest, h("div", { class: "small muted" }, r.phone)), h("td", null, fmtDate(r.check_in), " to ", fmtDate(r.check_out)),
+          h("td", null, badge(STATUS_CLASS[r.status] || "neutral", r.status)), h("td", null, inr.format(r.total)), h("td", null, inr.format(r.paid)), h("td", null, inr.format(r.refunded + r.refund_in_progress)), h("td", null, inr.format(r.balance)),
+          h("td", null, r.flags.map((f) => badge(FLAG[f][0], FLAG[f][1]))), h("td", { class: "actions" }, can("refund") && r.net > 0 ? h("button", { class: "btn small secondary", type: "button", "aria-label": `Refund by hand, booking ${r.booking_id}`, onclick: () => editDialog(`Refund by hand: booking #${r.booking_id}`,
+            [{ name: "amount", label: `Amount, Rs (up to ${r.net})`, type: "number", req: true, min: 1, hi: r.net }, { name: "reason", label: "Reason", req: true, max: 200 }], {}, (b) => api("/api/payments/refund", { ...b, booking_id: r.booking_id }), reload) }, "Refund") : null)))))) : h("p", { class: "empty card" }, "No bookings with money recorded in this period."));
+  };
+  const loadRefunds = async () => {
+    const rows = await api("/api/payments/refunds?" + qs({ property_id: S.prop, status: S.refStatus || "" }));
+    out.replaceChildren(h("div", { class: "toolbar" }, h("div", null, h("label", { for: "r_st" }, "Status"), h("select", { id: "r_st", onchange: (e) => { S.refStatus = e.target.value; reload(); } },
+      [["", "All"], ["manual", "Needs a person"], ["failed", "Failed"], ["requested", "Waiting to be sent"], ["pending", "With the provider"], ["processed", "Done"]].map(([v, l]) => opt(v, l, S.refStatus || ""))))),
+      rows.length ? h("div", { class: "scroll", role: "region", "aria-label": "Refunds", tabindex: "0" }, h("table", null, h("caption", null, `Refunds (${rows.length})`),
+        h("thead", null, h("tr", null, ["When", "Booking", "Amount", "Status", "Reason", "Actions"].map((x) => h("th", { scope: "col" }, x)))),
+        h("tbody", null, rows.map((r) => h("tr", null, h("td", null, fmtWhen(r.created_at)), h("td", null, "#" + r.group_id, h("div", { class: "small muted" }, r.guest)), h("td", null, inr.format(r.amount)),
+          h("td", null, badge({ processed: "available", pending: "cleaning", requested: "cleaning", sending: "cleaning", manual: "blocked", failed: "blocked" }[r.status], r.status), r.error ? h("div", { class: "small bad" }, r.error) : null),
+          h("td", null, r.reason || ""), h("td", { class: "actions" }, can("refund") && (r.status === "manual" || r.status === "failed") ? [
+            h("button", { class: "btn small", type: "button", "aria-label": `Mark refund ${r.id} done`, onclick: () => editDialog("Mark the refund as paid", [{ name: "note", label: "How was it paid? (bank reference, receipt)", req: true, max: 200 }], {}, (b) => api(`/api/refunds/${r.id}/done`, b), reload) }, "Mark done"),
+            r.status === "failed" ? h("button", { class: "btn small secondary", type: "button", onclick: () => api(`/api/refunds/${r.id}/retry`, {}).then(() => { toast("Sent again."); reload(); }).catch((x) => toast(x.message)) }, "Send again") : null] : null)))))) : h("p", { class: "empty card" }, "No refunds match."));
+  };
+  const load = () => (S.payTab === "refunds" ? loadRefunds() : loadReconcile());
+  const tab = (k, l) => h("button", { class: "btn small " + (S.payTab === k ? "" : "secondary"), type: "button", "aria-current": S.payTab === k ? "page" : null, onclick: () => { S.payTab = k; route(); } }, l);
+  root.replaceChildren(h("div", { class: "head" }, h("h1", null, "Payments"), h("div", { class: "toolbar" }, propSelect(reload), tab("reconcile", "Reconciliation"), tab("refunds", "Refunds"))), out);
+  await load();
+}
+
+// ---------- reports: daily arrivals, departures, occupancy; revenue and reconciliation; analytics. CSV and Google Sheets export ----------
+S.rep = { tab: "daily", date: "", from: "", to: "" };
+const REP_TABS = [["daily", "Daily"], ["occupancy", "Occupancy"], ["revenue", "Revenue and payments"], ["analytics", "Analytics"]];
+async function downloadBlob(path, fallbackName) {
+  const res = await fetch(path);
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "The download failed.");
+  const cd = res.headers.get("Content-Disposition") || "", name = (/filename="([^"]+)"/.exec(cd) || [])[1] || fallbackName;
+  const url = URL.createObjectURL(await res.blob()), a = h("a", { href: url, download: name });
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+function reportBlock(name, params, note) {
+  const box = h("section", { class: "rep", "aria-live": "polite" }, loading());
+  const q = { report: name, property_id: S.prop, ...params };
+  const csv = () => downloadBlob("/api/reports/csv?" + qs(q), name + ".csv").catch((e) => toast(e.message));
+  const sheets = async () => {
+    try {
+      const r = await api("/api/reports/export", { ...q, target: "sheets" });
+      if (r.exported === "sheets") toast("Sent to Google Sheets."), window.open(r.url, "_blank", "noopener");
+      else { toast(r.message); csv(); }
+    } catch (e) { toast(e.message); }
+  };
+  api("/api/reports/data?" + qs(q)).then((t) => {
+    box.replaceChildren(h("div", { class: "head" }, h("h2", null, t.title), can("report_export") ? h("div", { class: "actions" }, h("button", { class: "btn small secondary", type: "button", onclick: csv }, "Download CSV"),
+      h("button", { class: "btn small secondary", type: "button", onclick: sheets }, "Send to Google Sheets")) : null), note ? h("p", { class: "hint" }, note) : null,
+      t.rows.length ? h("div", { class: "scroll", role: "region", "aria-label": t.title, tabindex: "0" }, h("table", null, h("thead", null, h("tr", null, t.columns.map((c) => h("th", { scope: "col" }, c)))),
+        h("tbody", null, t.rows.map((r) => h("tr", null, r.map((v) => h("td", null, typeof v === "number" && !Number.isInteger(v) ? v.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : v ?? ""))))))) : h("p", { class: "empty card" }, "Nothing to show for this period."));
+  }).catch((e) => box.replaceChildren(fail(e, () => route())));
+  return box;
+}
+async function reportsView(root) {
+  const r = S.rep, today = S.meta.today;
+  r.date ||= today; r.from ||= addDay(today, -29); r.to ||= today;
+  const tab = (k, l) => h("button", { class: "btn small " + (r.tab === k ? "" : "secondary"), type: "button", "aria-current": r.tab === k ? "page" : null, onclick: () => { r.tab = k; route(); } }, l);
+  const dates = (single) => h("form", { class: "toolbar", onsubmit: (e) => { e.preventDefault(); route(); } }, propSelect(route),
+    single ? h("div", null, h("label", { for: "r_d" }, "Date"), h("input", { id: "r_d", type: "date", value: r.date, onchange: (e) => { r.date = e.target.value; route(); } }))
+      : [h("div", null, h("label", { for: "r_f" }, "From"), h("input", { id: "r_f", type: "date", value: r.from, onchange: (e) => { r.from = e.target.value; route(); } })), h("div", null, h("label", { for: "r_t" }, "To"), h("input", { id: "r_t", type: "date", value: r.to, onchange: (e) => { r.to = e.target.value; route(); } }))]);
+  let body;
+  if (r.tab === "daily") body = [dates(true), reportBlock("arrivals", { date: r.date }), reportBlock("departures", { date: r.date }), reportBlock("seva_schedule", { from: r.date, to: addDay(r.date, 6) }, "Sevas booked for the next seven days.")];
+  else if (r.tab === "occupancy") body = [dates(false), h("p", { class: "hint" }, "Occupancy is rooms with a live stay that night out of the rooms that could be sold (rooms minus blocked, maintenance and out of service). At most 92 days."), reportBlock("occupancy", { from: r.from, to: r.to })];
+  else if (r.tab === "revenue") body = [dates(false), reportBlock("revenue_by_day", { from: r.from, to: r.to }, "Booked value is live bookings by check-in date; received and refunded are by the day the money moved."), reportBlock("revenue_by_property", { from: r.from, to: r.to }),
+    reportBlock("revenue_by_method", { from: r.from, to: r.to }), reportBlock("reconciliation", { from: r.from, to: r.to }, "Check-ins in the period against the money recorded for each booking."), reportBlock("payments_funnel", { from: r.from, to: r.to })];
+  else body = [dates(false), h("p", { class: "hint" }, "First-party counters only: no visitor is identified, tracked or sent to another company. Counts are added up per day and kept for 400 days."),
+    reportBlock("funnel", { from: r.from, to: r.to }, "Each step counts actions, not people. 'Dropped here' is how many fewer reached this step than the one before."), reportBlock("searches", { from: r.from, to: r.to }), reportBlock("soldout", {}, "The next 60 nights with no room free, and how many searches in the last 90 days ran into a sold-out night.")];
+  root.replaceChildren(h("div", { class: "head" }, h("h1", null, "Reports"), h("div", { class: "toolbar" }, REP_TABS.map(([k, l]) => tab(k, l)))), ...body);
+}
+
+// ---------- notices: weather and river level, shown on the guest site and in confirmations ----------
+const NOTICE_LEVEL = { info: "available", watch: "maintenance", warning: "blocked" };
+async function noticesView(root) {
+  const rows = await api("/api/notices");
+  const fields = [{ name: "kind", label: "Kind", type: "select", options: [["weather", "Weather"], ["river", "River level"], ["general", "General"]] }, { name: "level", label: "Level", type: "select", options: [["info", "For information"], ["watch", "Watch"], ["warning", "Warning"]] },
+    { name: "text", label: "What guests should know (up to 300 characters)", type: "textarea", max: 300, req: true }, { name: "starts_on", label: "From", type: "date", req: true }, { name: "ends_on", label: "Until (empty = until you switch it off)", type: "date" }, { name: "active", label: "Showing to guests", type: "bool" }];
+  const edit = (n) => editDialog(n ? "Edit notice" : "New notice", fields, n ? { ...n, active: !!n.active } : { kind: "weather", level: "info", starts_on: S.meta.today, active: true }, (v) => api("/api/notices", { ...v, id: n && n.id }), () => route());
+  root.replaceChildren(h("div", { class: "head" }, h("h1", null, "Notices"), can("notices") ? h("button", { class: "btn", type: "button", onclick: () => edit() }, "New notice") : null),
+    h("p", { class: "muted" }, "Weather and river-level notices appear at the top of the guest site and in the confirmation of every stay they cover (a warning is also added to the SMS). Write them yourself from what you know: the app does not fetch weather or river data."),
+    rows.length ? h("div", { class: "scroll", role: "region", "aria-label": "Notices", tabindex: "0" }, h("table", null, h("caption", null, `Notices (${rows.length})`),
+      h("thead", null, h("tr", null, ["Kind", "Level", "Notice", "From", "Until", "Showing", "By", "Actions"].map((x) => h("th", { scope: "col" }, x)))),
+      h("tbody", null, rows.map((n) => h("tr", null, h("td", null, n.kind), h("td", null, badge(NOTICE_LEVEL[n.level], n.level)), h("td", null, n.text), h("td", null, fmtDate(n.starts_on)), h("td", null, n.ends_on ? fmtDate(n.ends_on) : "Open"), h("td", null, yn(n.active)), h("td", null, n.created_name || ""),
+        h("td", { class: "actions" }, can("notices") ? [h("button", { class: "btn small secondary", type: "button", onclick: () => edit(n) }, "Edit"),
+          n.active ? h("button", { class: "btn small secondary", type: "button", onclick: async () => { try { await api("/api/notices", { ...n, active: false }); route(); } catch (e) { toast(e.message); } } }, "Switch off") : null] : null)))))) : h("p", { class: "empty card" }, "No notices."));
+}
+
+// ---------- feedback and ratings ----------
+S.fb = { max: "5", status: "" };
+async function feedbackView(root) {
+  const d = await api("/api/feedback?" + qs({ property_id: S.prop, max: S.fb.max, status: S.fb.status })), sm = d.summary;
+  const review = (r) => editDialog(`Feedback on booking #${r.group_id}`, [{ name: "staff_note", label: "Your note (what was done)", type: "textarea", max: 300 }], { staff_note: r.staff_note || "" }, (v) => api(`/api/feedback/${r.id}/review`, v), () => route());
+  root.replaceChildren(h("div", { class: "head" }, h("h1", null, "Guest feedback"), h("div", { class: "toolbar" }, propSelect(() => route()),
+    h("div", null, h("label", { for: "fb_max" }, "Ratings up to"), h("select", { id: "fb_max", onchange: (e) => { S.fb.max = e.target.value; route(); } }, [5, 4, 3, 2].map((n) => opt(n, n + " stars", S.fb.max)))),
+    h("div", null, h("label", { for: "fb_st" }, "Status"), h("select", { id: "fb_st", onchange: (e) => { S.fb.status = e.target.value; route(); } }, [["", "All"], ["new", "Not reviewed"], ["reviewed", "Reviewed"]].map(([v, l]) => opt(v, l, S.fb.status)))),
+    h("button", { class: "btn secondary", type: "button", onclick: () => downloadBlob("/api/reports/csv?report=feedback&property_id=" + (S.prop || ""), "feedback.csv").catch((e) => toast(e.message)) }, "Download CSV"))),
+    h("ul", { class: "counts", "aria-label": "Ratings" }, [["Replies", sm.count], ["Average rating", sm.rating ?? "–"], ["Cleanliness", sm.cleanliness ?? "–"], ["Service", sm.service ?? "–"], ["5 / 4 / 3 / 2 / 1 stars", [5, 4, 3, 2, 1].map((n) => sm.distribution[n]).join(" / ")]].map(([l, v]) => h("li", null, h("strong", null, v), h("span", null, l)))),
+    sm.by_property.length > 1 ? h("p", { class: "small muted" }, sm.by_property.map((p) => `${p.property}: ${p.rating} (${p.count})`).join(" · ")) : null,
+    d.rows.length ? h("div", { class: "scroll", role: "region", "aria-label": "Feedback", tabindex: "0" }, h("table", null, h("caption", null, `Feedback (${d.rows.length})`),
+      h("thead", null, h("tr", null, ["When", "Booking", "Rating", "Comment", "Status", "Actions"].map((x) => h("th", { scope: "col" }, x)))),
+      h("tbody", null, d.rows.map((r) => h("tr", null, h("td", null, fmtWhen(r.created_at)), h("td", null, "#" + r.group_id, h("div", { class: "small muted" }, r.guest + " · " + r.property)),
+        h("td", null, badge(r.rating <= 2 ? "blocked" : r.rating === 3 ? "maintenance" : "available", r.rating + " / 5"), (r.cleanliness || r.service) ? h("div", { class: "small muted" }, `Clean ${r.cleanliness || "–"}, service ${r.service || "–"}`) : null),
+        h("td", null, r.comment || h("span", { class: "muted" }, "(no comment)"), r.staff_note ? h("div", { class: "small muted" }, `${r.reviewed_by}: ${r.staff_note}`) : null), h("td", null, badge(r.status === "new" ? "booked" : "neutral", r.status === "new" ? "Not reviewed" : "Reviewed")),
+        h("td", { class: "actions" }, h("button", { class: "btn small secondary", type: "button", onclick: () => review(r) }, r.status === "new" ? "Mark reviewed" : "Edit note"))))))) : h("p", { class: "empty card" }, "No feedback matches."));
+}
+
+// ---------- festival broadcasts (opt-in subscribers only) ----------
+async function broadcastsView(root) {
+  const d = await api("/api/broadcasts"), LN = { en: "English", te: "Telugu", kn: "Kannada", ta: "Tamil", hi: "Hindi" };
+  const err = h("p", { class: "msg error", role: "alert", hidden: true }), fest = h("select", { id: "bc_f" }, h("option", { value: "" }, "(no festival)"), d.festivals.map((f) => h("option", { value: f.id }, `${f.name}, ${fmtDate(f.start_date)}`)));
+  const chans = [["sms", "SMS"], ["whatsapp", "WhatsApp"], ["email", "Email"]];
+  const f = h("form", { class: "card", style: "display:grid;gap:1rem;max-width:44rem", "aria-label": "New broadcast" }, h("h2", null, "Send a message"),
+    h("p", { class: "hint" }, `Goes only to people who opted in (a verified mobile number for SMS and WhatsApp, a confirmed email link). Every message ends with an unsubscribe link. At most ${d.limit} a day. WhatsApp needs your gateway to allow this kind of message.`),
+    h("div", null, h("label", { for: "bc_t", class: "req" }, "Title (also the email subject)"), h("input", { id: "bc_t", maxlength: 80, required: true })),
+    h("div", { class: "toolbar" }, h("div", null, h("label", { for: "bc_f" }, "About a festival"), fest), h("button", { class: "btn secondary", type: "button", onclick: () => { const x = d.festivals.find((q) => String(q.id) === fest.value); if (x) { $("#bc_t").value = `${x.name}: rooms at Mantralayam`; $("#bc_en").value = `${x.name} is on ${fmtDate(x.start_date)}${x.end_date !== x.start_date ? " to " + fmtDate(x.end_date) : ""}. Rooms fill early: book now at our website.`; } } }, "Fill in a draft")),
+    h("div", null, h("label", { for: "bc_en", class: "req" }, "Message in English (up to 600 characters)"), h("textarea", { id: "bc_en", maxlength: 600, required: true })),
+    h("details", null, h("summary", null, "Messages in other languages (optional: subscribers get their own language, else English)"), d.langs.filter((l) => l !== "en").map((l) => h("div", null, h("label", { for: "bc_" + l }, LN[l]), h("textarea", { id: "bc_" + l, maxlength: 600 })))),
+    h("fieldset", null, h("legend", null, "Send by"), h("div", { class: "grid2" }, chans.map(([k, l]) => h("label", { style: "display:flex;gap:.5rem;align-items:center" }, h("input", { type: "checkbox", name: "bc_ch", value: k, checked: k !== "whatsapp" || d.whatsapp }), `${l} (${d.counts[k]} people)`)))), err,
+    h("div", null, h("button", { class: "btn", type: "submit" }, "Send now")));
+  f.addEventListener("submit", async (e) => {
+    e.preventDefault(); err.hidden = true; if (!f.reportValidity()) return;
+    const channels = [...f.querySelectorAll("input[name=bc_ch]:checked")].map((i) => i.value), texts = Object.fromEntries(d.langs.map((l) => [l, ($("#bc_" + l).value || "").trim()]).filter(([, v]) => v));
+    if (!confirm(`Send this message now to everyone opted in on: ${channels.join(", ")}? It cannot be recalled.`)) return;
+    try { const r = await api("/api/broadcasts", { title: $("#bc_t").value, texts, channels, festival_id: fest.value, confirm: true }); toast(`Sent: ${r.sent}, failed: ${r.failed}, people: ${r.recipients}.`); route(); } catch (x) { err.textContent = x.message; err.hidden = false; }
+  });
+  const history = d.history.length ? h("div", { class: "scroll", role: "region", "aria-label": "Sent messages", tabindex: "0" }, h("table", null, h("caption", null, "Sent messages"), h("thead", null, h("tr", null, ["When", "Title", "By", "Channels", "People", "Sent", "Failed"].map((x) => h("th", { scope: "col" }, x)))),
+    h("tbody", null, d.history.map((b) => h("tr", null, h("td", null, fmtWhen(b.created_at)), h("td", null, b.title), h("td", null, b.created_by_name), h("td", null, b.channels), h("td", null, b.recipients), h("td", null, b.sent), h("td", null, b.failed)))))) : h("p", { class: "empty card" }, "Nothing sent yet.");
+  const subs = d.subscribers.length ? h("div", { class: "scroll", role: "region", "aria-label": "Subscribers", tabindex: "0" }, h("table", null, h("caption", null, `Subscribers (${d.subscribers.length})`), h("thead", null, h("tr", null, ["Name", "Mobile", "Email", "Opted in for", "Since", ""].map((x) => h("th", { scope: "col" }, x)))),
+    h("tbody", null, d.subscribers.map((x) => h("tr", null, h("td", null, x.name || ""), h("td", null, x.phone), h("td", null, x.email, x.pending_email ? h("div", { class: "small muted" }, "waiting for the email link") : null),
+      h("td", null, x.unsubscribed ? badge("neutral", "Unsubscribed") : [x.sms && "SMS", x.whatsapp && "WhatsApp", x.email_ok && "Email"].filter(Boolean).join(", ") || "Not confirmed yet"), h("td", null, fmtDate(x.consent_at.slice(0, 10))),
+      h("td", { class: "actions" }, x.unsubscribed ? null : h("button", { class: "btn small secondary", type: "button", "aria-label": "Remove subscriber " + x.id, onclick: async () => { if (confirm("Remove this person from all festival messages?")) try { await api(`/api/subscribers/${x.id}/unsubscribe`, {}); route(); } catch (e) { toast(e.message); } } }, "Remove"))))))) : h("p", { class: "empty card" }, "Nobody has signed up yet. The sign-up form is on the guest site under Festival updates.");
+  root.replaceChildren(h("h1", null, "Festival broadcasts"), f, h("h2", null, "History"), history, h("h2", null, "Subscribers"), subs);
+}
+
+// ---------- the guest message log (managers): no message text is kept, only whether it was delivered ----------
+async function messagesView(root) {
+  const out = h("div", null);
+  const reload = () => load().catch((x) => out.replaceChildren(fail(x, reload)));
+  const load = async () => {
+    const rows = await api("/api/notification_log?" + qs({ property_id: S.prop, status: S.msgStatus || "", event: S.msgEvent || "", booking_id: S.msgBooking || "" }));
+    out.replaceChildren(rows.length ? h("div", { class: "scroll", role: "region", "aria-label": "Messages", tabindex: "0" }, h("table", null, h("caption", null, `Latest ${rows.length} messages`),
+      h("thead", null, h("tr", null, ["When", "Booking", "Message", "Channel", "To", "Status", "Tries", "Detail"].map((x) => h("th", { scope: "col" }, x)))),
+      h("tbody", null, rows.map((r) => h("tr", null, h("td", null, fmtWhen(r.ts)), h("td", null, "#" + r.group_id), h("td", null, r.event), h("td", null, r.channel + (r.provider ? " (" + r.provider + ")" : "")), h("td", null, r.to_hint || ""),
+        h("td", null, badge({ sent: "available", failed: "blocked", skipped: "neutral" }[r.status], r.status)), h("td", null, r.attempts), h("td", null, r.detail || ""))))))
+      : h("p", { class: "empty card" }, "No messages match."));
+  };
+  const sel = (id, label, key, options) => h("div", null, h("label", { for: id }, label), h("select", { id, onchange: (e) => { S[key] = e.target.value; reload(); } }, options.map(([v, l]) => opt(v, l, S[key] || ""))));
+  root.replaceChildren(h("h1", null, "Messages to guests"), h("p", { class: "muted" }, "Confirmations, changes, cancellations and arrival reminders by SMS, WhatsApp and email. Failed ones are tried again by the periodic job, up to 3 times."),
+    h("div", { class: "toolbar" }, propSelect(reload), sel("m_st", "Status", "msgStatus", [["", "All"], ["sent", "Sent"], ["failed", "Failed"], ["skipped", "Skipped"]]),
+      sel("m_ev", "Message", "msgEvent", [["", "All"], ["confirmed", "Confirmation"], ["changed", "Change"], ["cancelled", "Cancellation"], ["reminder", "Reminder"]]),
+      h("div", null, h("label", { for: "m_bk" }, "Booking ID"), h("input", { id: "m_bk", inputmode: "numeric", maxlength: 12, value: S.msgBooking || "", onchange: (e) => { S.msgBooking = e.target.value.trim(); reload(); } }))), out);
   await load();
 }
 
@@ -344,14 +724,14 @@ async function auditView(root) {
   const out = h("div", null);
   const load = async () => {
     out.replaceChildren(loading());
-    const rows = await api("/api/audit?" + qs({ property_id: S.prop, q: $("#f_aq")?.value || "" }));
+    const rows = await api("/api/audit?" + qs({ property_id: S.prop, q: $("#f_aq")?.value || "", sensitive: $("#f_sens")?.checked ? "1" : "" }));
     out.replaceChildren(rows.length ? h("div", { class: "scroll", role: "region", "aria-label": "Audit log", tabindex: "0" }, h("table", null, h("caption", null, `Latest ${rows.length} entries`),
       h("thead", null, h("tr", null, ["When", "Who", "Action", "Where", "Details"].map((t) => h("th", { scope: "col" }, t)))),
       h("tbody", null, rows.map((r) => h("tr", null, h("td", null, fmtWhen(r.ts)), h("td", null, r.username || "system", r.role ? h("div", { class: "small muted" }, r.role.replace("_", " ")) : null),
         h("td", null, r.action), h("td", null, [r.property, r.room ? "room " + r.room : null].filter(Boolean).join(" · ")),
         h("td", null, [r.old_value && r.new_value ? `${r.old_value} → ${r.new_value}` : r.new_value || r.old_value, r.reason].filter(Boolean).join(" · "))))))) : h("p", { class: "empty card" }, "No entries match."));
   };
-  const f = h("form", { class: "toolbar", role: "search" }, propSelect(() => {}), h("div", { class: "grow" }, h("label", { for: "f_aq" }, "Search action, user or details"), h("input", { id: "f_aq", maxlength: 60 })), h("button", { class: "btn", type: "submit" }, "Search"));
+  const f = h("form", { class: "toolbar", role: "search" }, propSelect(() => {}), h("div", { class: "grow" }, h("label", { for: "f_aq" }, "Search action, user or details"), h("input", { id: "f_aq", maxlength: 60 })), h("label", { style: "display:flex;gap:.5rem;align-items:center" }, h("input", { type: "checkbox", id: "f_sens" }), "Sensitive actions only (IDs, money, cancellations, blocks, users, settings)"), h("button", { class: "btn", type: "submit" }, "Search"));
   f.addEventListener("submit", (e) => { e.preventDefault(); load().catch((x) => out.replaceChildren(fail(x, load))); });
   root.replaceChildren(h("h1", null, "Audit log"), f, out);
   await load();
@@ -366,6 +746,18 @@ const adminSection = (title, addLabel, onAdd, table) => h("section", { "aria-lab
 const adminActions = (editFn, name, toggleBtn) => h("td", { class: "actions" }, h("button", { class: "btn small secondary", type: "button", "aria-label": "Edit " + name, onclick: editFn }, "Edit"), toggleBtn);
 const toggleBtn = (kind, r, name, reload) => h("button", { class: "btn small secondary", type: "button", "aria-label": `${r.active ? "Deactivate" : "Activate"} ${name}`, onclick: async () => {
   try { await api(`/api/admin/${kind}/${r.id}/active`, { active: !r.active }); toast(`${name} ${r.active ? "deactivated" : "activated"}.`); await reload(); } catch (e) { toast(e.message); } } }, r.active ? "Deactivate" : "Activate");
+function photoDialog(t, reload) {
+  const input = h("input", { type: "file", accept: "image/jpeg,image/png,image/webp", id: "ph_f" }), err = h("p", { class: "msg error", role: "alert", hidden: true });
+  const dlg = h("dialog", { "aria-labelledby": "ph_h" }, h("form", { method: "dialog", onsubmit: (e) => e.preventDefault() }, h("h2", { id: "ph_h" }, "Photo of " + t.name), h("p", { class: "hint" }, "JPEG, PNG or WebP, at most 1.5 MB. It is shown on the room card; a wide picture (8:5) fits best."),
+    h("div", null, h("label", { for: "ph_f" }, "Choose a photo"), input), err, h("div", { class: "foot" }, h("button", { class: "btn secondary", type: "button", onclick: () => dlg.close() }, "Close"),
+      h("button", { class: "btn", type: "button", onclick: async () => {
+        const f = input.files[0]; err.hidden = true; if (!f) { err.textContent = "Choose a photo first."; err.hidden = false; return; }
+        const res = await fetch(`/api/admin/room_types/${t.id}/photo`, { method: "POST", headers: { "Content-Type": f.type, "X-CSRF-Token": CSRF }, body: f });
+        const data = await res.json().catch(() => ({})); if (!res.ok) { err.textContent = data.error || "Upload failed."; err.hidden = false; return; }
+        dlg.close(); toast("Photo saved."); reload(); } }, "Upload"))));
+  dlg.addEventListener("close", () => dlg.remove()); document.body.append(dlg); dlg.showModal();
+}
+const extraToggle = (kind, r, name, reload) => h("button", { class: "btn small secondary", type: "button", "aria-label": `${r.active ? "Deactivate" : "Activate"} ${name}`, onclick: async () => { try { await api(`/api/admin/extras/${kind}/${r.id}/active`, { active: !r.active }); reload(); } catch (e) { toast(e.message); } } }, r.active ? "Deactivate" : "Activate");
 const num = (min, hi) => ({ type: "number", min, hi });
 
 const ADMIN_SECTIONS = {
@@ -382,25 +774,27 @@ const ADMIN_SECTIONS = {
       { name: "description", label: "Description", type: "textarea", max: 300 }];
     const edit = (t) => editDialog(t ? "Edit room type" : "Add room type", fields, t || {}, (v) => api("/api/admin/room_types", { ...v, id: t && t.id }), reload);
     return adminSection("Room types", "Add room type", () => edit(), adminTable("Room types", ["Name", "Sleeps", "Tariff", "Status", "Actions"],
-      d.room_types.map((t) => h("tr", null, h("td", null, h("strong", null, t.name), h("div", { class: "small muted" }, t.description || "")), h("td", null, t.capacity), h("td", null, inr.format(t.tariff)),
-        h("td", null, yn(t.active)), adminActions(() => edit(t), t.name, toggleBtn("room_types", t, t.name, reload)))), "No room types yet."));
+      d.room_types.map((t) => h("tr", null, h("td", null, h("strong", null, t.name), h("div", { class: "small muted" }, t.description || ""), t.photo ? h("img", { src: "/uploads/" + t.photo, alt: "Photo of " + t.name, width: 96, height: 60, style: "margin-top:.4rem;border-radius:8px;object-fit:cover" }) : h("div", { class: "small muted" }, "No photo yet: guests see a plain picture.")),
+        h("td", null, t.capacity), h("td", null, inr.format(t.tariff)), h("td", null, yn(t.active)), h("td", { class: "actions" }, h("button", { class: "btn small secondary", type: "button", onclick: () => photoDialog(t, reload) }, t.photo ? "Change photo" : "Add photo"),
+          t.photo ? h("button", { class: "btn small secondary", type: "button", onclick: async () => { try { await api(`/api/admin/room_types/${t.id}/photo_remove`, {}); reload(); } catch (e) { toast(e.message); } } }, "Remove photo") : null, ...adminActions(() => edit(t), t.name, toggleBtn("room_types", t, t.name, reload)).children))), "No room types yet."));
   },
   rooms: (d, reload) => {
     const edit = (r) => editDialog(r ? "Edit room " + r.number : "Add room", [
       { name: "property_id", label: "Property", type: "select", req: true, disabled: !!r, options: d.properties.filter((p) => p.active || (r && r.property_id === p.id)).map((p) => [p.id, p.name]) },
       { name: "number", label: "Room number", req: true, max: 20 }, { name: "floor", label: "Floor", ...num(-5, 200) },
       { name: "room_type_id", label: "Room type", type: "select", req: true, options: d.room_types.filter((t) => t.active || (r && r.room_type_id === t.id)).map((t) => [t.id, t.name]) },
-      { name: "capacity", label: "Sleeps", req: true, ...num(1, 100) }, { name: "amenities", label: "Amenities (comma separated)", max: 300 }], r || { floor: 0 },
+      { name: "capacity", label: "Sleeps", req: true, ...num(1, 100) }, { name: "amenities", label: "Amenities (comma separated)", max: 300 },
+      { name: "senior_friendly", label: "Senior-citizen friendly (shown to guests who filter for it)", type: "bool" }], r ? { ...r, senior_friendly: !!r.senior_friendly } : { floor: 0 },
       (v) => api("/api/admin/rooms", { ...v, id: r && r.id }), reload);
     return adminSection("Rooms", "Add room", () => edit(), adminTable("Rooms", ["Room", "Property", "Type", "Sleeps", "Status", "Actions"],
-      d.rooms.map((r) => h("tr", null, h("td", null, h("strong", null, r.number), h("div", { class: "small muted" }, "Floor " + r.floor)), h("td", null, r.property), h("td", null, r.type), h("td", null, r.capacity),
+      d.rooms.map((r) => h("tr", null, h("td", null, h("strong", null, r.number), h("div", { class: "small muted" }, "Floor " + r.floor + (r.floor === 0 ? " (ground)" : "") + (r.senior_friendly ? " · senior-friendly" : ""))), h("td", null, r.property), h("td", null, r.type), h("td", null, r.capacity),
         h("td", null, yn(r.active)), adminActions(() => edit(r), "room " + r.number, toggleBtn("rooms", r, "room " + r.number, reload)))), "No rooms yet."));
   },
   users: (d, reload) => {
     const edit = (u) => editDialog(u ? "Edit user" : "Add user", [
       { name: "username", label: "Username", req: true, max: 40 }, { name: "full_name", label: "Full name", req: true, max: 100 },
       { name: "role", label: "Role", type: "select", req: true, options: d.roles.map((r) => [r.name, r.label]) },
-      { name: "password", label: u ? "New password (leave empty to keep the current one)" : "Password", type: "password", req: !u, max: 200, hint: "At least 8 characters. A password reset signs the user out." },
+      { name: "password", label: u ? "New password (leave empty to keep the current one)" : "Password", type: "password", req: !u, max: 200, hint: "At least 10 characters. A password reset signs the user out." },
       { name: "property_ids", label: "Properties this user can work in (not needed for super admin)", type: "checks", options: d.properties.filter((p) => p.active).map((p) => [p.id, p.name]) }],
       u ? { ...u, password: "" } : { role: "front_desk", property_ids: [] }, (v) => api("/api/admin/users", { ...v, id: u && u.id }), reload);
     const pname = (u) => u.role === "super_admin" ? "All" : u.property_ids.map((i) => (d.properties.find((p) => p.id === i) || {}).name).filter(Boolean).join(", ") || "None";
@@ -412,33 +806,148 @@ const ADMIN_SECTIONS = {
     const fields = [{ name: "name", label: "Name (for example Brahmotsavam)", req: true, max: 100 },
       { name: "start_date", label: "First night", type: "date", req: true }, { name: "end_date", label: "Last night", type: "date", req: true },
       { name: "max_nights", label: "Most nights per booking (empty: normal limit)", ...num(1, 60) }, { name: "max_rooms", label: "Most rooms per booking (empty: normal limit)", ...num(1, 20) },
+      { name: "surcharge_percent", label: "Price increase on these nights, % (empty: normal price)", ...num(0, 500) },
       { name: "note", label: "Note shown to guests", type: "textarea", max: 500 }];
     const edit = (x) => editDialog(x ? "Edit peak period" : "Add peak period", fields, x || {}, (v) => api("/api/admin/peak_periods", { ...v, id: x && x.id }), reload);
     const limits = (x) => [x.max_nights ? `up to ${x.max_nights} nights` : null, x.max_rooms ? `up to ${x.max_rooms} room${x.max_rooms > 1 ? "s" : ""}` : null].filter(Boolean).join(", ") || "Normal limits";
+    const price = (x) => x.surcharge_percent ? `+${x.surcharge_percent}%` : "Normal price";
     return adminSection("Peak periods", "Add peak period", () => edit(), h("div", { style: "display:grid;gap:var(--s3)" },
       h("p", { class: "muted" }, "Festival or busy dates. A limit here can only tighten the normal settings, never loosen them, and applies to online bookings whose nights touch the period. Existing bookings are not changed."),
-      adminTable("Peak periods", ["Name", "Dates (nights)", "Online limits", "Note", "Status", "Actions"],
-        d.peak_periods.map((x) => h("tr", null, h("td", null, h("strong", null, x.name)), h("td", null, fmtDate(x.start_date), " to ", fmtDate(x.end_date)), h("td", null, limits(x)),
+      adminTable("Peak periods", ["Name", "Dates (nights)", "Online limits", "Price", "Note", "Status", "Actions"],
+        d.peak_periods.map((x) => h("tr", null, h("td", null, h("strong", null, x.name)), h("td", null, fmtDate(x.start_date), " to ", fmtDate(x.end_date)), h("td", null, limits(x)), h("td", null, price(x)),
           h("td", null, x.note || ""), h("td", null, yn(x.active)), adminActions(() => edit(x), x.name, toggleBtn("peak_periods", x, x.name, reload)))), "No peak periods yet.")));
+  },
+  promos: (d, reload) => {
+    const opts = (list, any) => [["", any], ...list.map((x) => [x.id, x.name])];
+    const fields = [{ name: "auto", label: "Automatic pilgrim group rate (applies without a code when the stay qualifies)", type: "bool" },
+      { name: "code", label: "Code (leave empty for an automatic rate)", max: 32, hint: "Letters, numbers, - and _. Guests can type it in any case." }, { name: "label", label: "Name shown to guests and in reports", req: true, max: 100 },
+      { name: "kind", label: "Discount type", type: "select", req: true, options: [["percent", "Percent of the room charge"], ["flat", "Flat rupees off the room charge"]] },
+      { name: "value", label: "Value (percent, or rupees)", req: true, ...num(0.01, 1000000) }, { name: "max_discount", label: "Largest discount in rupees (empty: none)", ...num(1, 1000000) },
+      { name: "min_rooms", label: "Minimum rooms (empty: none)", ...num(1, 100) }, { name: "min_guests", label: "Minimum guests (empty: none)", ...num(1, 1000) }, { name: "min_nights", label: "Minimum nights (empty: none)", ...num(1, 60) },
+      { name: "valid_from", label: "Valid from (booking date)", type: "date" }, { name: "valid_to", label: "Valid until (booking date)", type: "date" },
+      { name: "max_uses", label: "Most bookings that may use it in total (empty: unlimited)", ...num(1, 10000000) }, { name: "per_phone_limit", label: "Most uses per mobile number (empty: unlimited)", ...num(1, 1000) },
+      { name: "exclude_peak", label: "Not valid when the stay touches a peak period", type: "bool" },
+      { name: "property_id", label: "Only this building", type: "select", options: opts(d.properties, "Any building") }, { name: "room_type_id", label: "Only this room type", type: "select", options: opts(d.room_types, "Any room type") }];
+    const edit = (x) => editDialog(x ? "Edit promo code" : "Add promo code", fields, x ? { ...x, auto: !!x.auto, exclude_peak: !!x.exclude_peak, property_id: x.property_id ?? "", room_type_id: x.room_type_id ?? "" } : { kind: "percent", exclude_peak: true },
+      (v) => api("/api/admin/promos", { ...v, id: x && x.id }), reload);
+    const rules = (x) => [x.min_rooms && `${x.min_rooms}+ rooms`, x.min_guests && `${x.min_guests}+ guests`, x.min_nights && `${x.min_nights}+ nights`, x.exclude_peak && "not on peak dates", x.property && x.property, x.room_type && x.room_type].filter(Boolean).join(", ") || "None";
+    return adminSection("Promo, donor and group-rate codes", "Add promo code", () => edit(), h("div", { style: "display:grid;gap:var(--s3)" },
+      h("p", { class: "muted" }, "A discount comes off the room charge only (not extra beds, children or tax). A booking gets one discount: the larger of the code the guest typed and the best automatic group rate. Usage counts bookings that are not cancelled."),
+      adminTable("Promo codes", ["Code", "Discount", "Rules", "Valid", "Used", "Status", "Actions"],
+        d.promos.map((x) => h("tr", null, h("td", null, h("strong", null, x.code || "Automatic"), h("div", { class: "small muted" }, x.label)),
+          h("td", null, x.kind === "percent" ? x.value + "%" : inr.format(x.value), x.max_discount ? h("div", { class: "small muted" }, "up to " + inr.format(x.max_discount)) : null), h("td", null, rules(x)),
+          h("td", null, x.valid_from || x.valid_to ? [x.valid_from ? fmtDate(x.valid_from) : "any time", " to ", x.valid_to ? fmtDate(x.valid_to) : "no end"] : "Always"),
+          h("td", null, x.uses + (x.max_uses ? " of " + x.max_uses : ""), x.per_phone_limit ? h("div", { class: "small muted" }, x.per_phone_limit + " per mobile") : null), h("td", null, yn(x.active)),
+          adminActions(() => edit(x), x.code || x.label, toggleBtn("promo_codes", x, x.code || x.label, reload)))), "No promo codes yet.")));
+  },
+  site_config: (d, reload) => {
+    const LANG_NAME = { en: "English", te: "Telugu", kn: "Kannada", ta: "Tamil", hi: "Hindi" };
+    const edit = (x) => {
+      const langs = x.translatable ? d.langs : ["en"];
+      editDialog("Edit: " + x.label, langs.map((l) => ({ name: l, label: LANG_NAME[l] + (l === "en" ? " (source)" : " (leave empty to show English)"), type: "textarea", max: 2000 })), x.values,
+        async (v) => { for (const l of langs) if ((v[l] || "") !== (x.values[l] || "")) await api("/api/admin/site_config", { key: x.key, lang: l, value: v[l] }); }, reload);
+    };
+    return adminSection("Site info", null, null, h("div", { style: "display:grid;gap:var(--s3)" },
+      h("p", { class: "muted" }, "Facts shown to guests, such as timings, directions and policies. Items marked TODO are not shown to guests until you fill them in. Enter only facts you have confirmed."),
+      adminTable("Site info", ["Item", "Value (English)", "Status", "Actions"],
+        d.site_config.map((x) => h("tr", null, h("td", null, h("strong", null, x.label)), h("td", null, x.values.en || ""), h("td", null, badge(x.todo ? "blocked" : "available", x.todo ? "TODO" : "Set")),
+          adminActions(() => edit(x), x.label, null))), "No items.")));
+  },
+  faqs: (d, reload) => {
+    const LN = { en: "English", te: "Telugu", kn: "Kannada", ta: "Tamil", hi: "Hindi" };
+    const fields = [{ name: "position", label: "Order (smaller numbers first)", ...num(0, 9999) },
+      ...d.langs.flatMap((l) => [{ name: "q_" + l, label: `Question, ${LN[l]}` + (l === "en" ? "" : " (optional)"), req: l === "en", max: 300 }, { name: "a_" + l, label: `Answer, ${LN[l]}` + (l === "en" ? "" : " (optional)"), type: "textarea", req: l === "en", max: 2000 }])];
+    const flat = (f) => f ? Object.assign({ position: f.position }, ...d.langs.map((l) => ({ ["q_" + l]: (f.texts[l] || {}).question || "", ["a_" + l]: (f.texts[l] || {}).answer || "" }))) : { position: d.faqs.length + 1 };
+    const edit = (f) => editDialog(f ? "Edit FAQ" : "Add FAQ", fields, flat(f), (v) => api("/api/admin/faqs", { id: f && f.id, position: v.position,
+      texts: Object.fromEntries(d.langs.map((l) => [l, { question: v["q_" + l], answer: v["a_" + l] }]).filter(([, t]) => t.question || t.answer)) }), reload);
+    return adminSection("FAQ", "Add FAQ", () => edit(), h("div", { style: "display:grid;gap:var(--s3)" },
+      h("p", { class: "muted" }, "Questions guests see on the FAQ page. A FAQ whose answer is empty or TODO is not shown. Drafts made from call-back notes start inactive: write the answer, check the note holds no personal details, then activate."),
+      adminTable("FAQ", ["Order", "Question", "Status", "Actions"], d.faqs.map((f) => { const en = f.texts.en || { question: "", answer: "" };
+        return h("tr", null, h("td", null, f.position), h("td", null, h("strong", null, en.question), /^TODO/.test(en.answer) ? h("div", { class: "small muted" }, "Answer: TODO") : null),
+          h("td", null, yn(f.active)), adminActions(() => edit(f), "FAQ " + f.id, toggleBtn("faqs", f, "FAQ " + f.id, reload))); }), "No FAQs yet.")));
+  },
+  sevas: (d, reload) => {
+    const sv = d.extras.sevas, fields = [{ name: "name", label: "Seva name", req: true, max: 100 }, { name: "description", label: "Description", type: "textarea", max: 500 }, { name: "price", label: "Price per place (Rs)", req: true, ...num(0, 1000000) },
+      { name: "max_per_day", label: "Places per day (empty = no limit)", ...num(1, 10000) }, { name: "per_guest", label: "Packages book one place per guest", type: "bool" }, { name: "position", label: "Order on the page", ...num(0, 1000) }];
+    const edit = (x) => editDialog(x ? "Edit seva" : "Add seva", fields, x || { position: 0 }, (v) => api("/api/admin/sevas", { ...v, id: x && x.id }), reload);
+    return adminSection("Sevas", "Add seva", () => edit(), adminTable("Sevas", ["Seva", "Price", "Places a day", "Status", "Actions"], sv.map((x) => h("tr", null, h("td", null, h("strong", null, x.name), h("div", { class: "small muted" }, x.description || "")),
+      h("td", null, inr.format(x.price)), h("td", null, x.max_per_day || "No limit"), h("td", null, yn(x.active)), adminActions(() => edit(x), x.name, extraToggle("sevas", x, x.name, reload)))), "No sevas yet. Guests see a seva only when it is listed here and active."));
+  },
+  packages: (d, reload) => {
+    const ex = d.extras, sevaOpts = [["", "(none)"], ...ex.sevas.filter((x) => x.active).map((x) => [x.id, x.name])];
+    const fields = [{ name: "name", label: "Package name (for example Room + Seva)", req: true, max: 100 }, { name: "description", label: "Description", type: "textarea", max: 500 }, { name: "discount_percent", label: "Discount on its sevas (%)", ...num(0, 100) },
+      { name: "min_nights", label: "Minimum nights (empty = any)", ...num(1, 60) },
+      ...[1, 2, 3, 4].flatMap((i) => [{ name: "s" + i, label: `Seva ${i}`, type: "select", options: sevaOpts }, { name: "o" + i, label: `On day (0 = check-in day)`, ...num(0, 30) }, { name: "g" + i, label: "One place per guest", type: "bool" }])];
+    const val = (x) => x ? { ...x, ...Object.fromEntries(x.items.slice(0, 4).flatMap((it, i) => [["s" + (i + 1), it.seva_id], ["o" + (i + 1), it.day_offset], ["g" + (i + 1), !!it.per_guest]])) } : { discount_percent: 0 };
+    const edit = (x) => editDialog(x ? "Edit package" : "Add package", fields, val(x), (v) => api("/api/admin/packages", { id: x && x.id, name: v.name, description: v.description, discount_percent: v.discount_percent, min_nights: v.min_nights,
+      items: [1, 2, 3, 4].filter((i) => v["s" + i]).map((i) => ({ seva_id: +v["s" + i], day_offset: +v["o" + i] || 0, per_guest: !!v["g" + i] })) }), reload);
+    return adminSection("Packages", "Add package", () => edit(), h("div", null, h("p", { class: "muted" }, "A package bundles sevas on fixed days of the stay (for example room + the morning seva on the first day) with a discount on those sevas. Guests pick it while booking."),
+      adminTable("Packages", ["Package", "Sevas", "Discount", "Status", "Actions"], ex.packages.map((x) => h("tr", null, h("td", null, h("strong", null, x.name), h("div", { class: "small muted" }, x.description || "")),
+        h("td", null, x.items.map((i) => h("div", null, `${i.name}, day ${i.day_offset}${i.per_guest ? ", per guest" : ""}`))), h("td", null, x.discount_percent + "%" + (x.min_nights ? `, from ${x.min_nights} nights` : "")), h("td", null, yn(x.active)),
+        adminActions(() => edit(x), x.name, extraToggle("packages", x, x.name, reload)))), "No packages yet.")));
+  },
+  festivals: (d, reload) => {
+    const ex = d.extras, fields = [{ name: "name", label: "Festival", req: true, max: 100 }, { name: "kind", label: "Kind", type: "select", options: ex.festival_kinds.map((k) => [k, k]) }, { name: "start_date", label: "From", type: "date", req: true }, { name: "end_date", label: "To (empty = one day)", type: "date" },
+      { name: "note", label: "Note shown to guests", type: "textarea", max: 300 }, { name: "make_peak", label: "These dates are peak dates (price and booking limits follow)", type: "bool" }, { name: "surcharge_percent", label: "Peak surcharge on the nightly price (%)", ...num(0, 300) },
+      { name: "max_nights", label: "Most nights online (empty = usual limit)", ...num(1, 60) }, { name: "max_rooms", label: "Most rooms online (empty = usual limit)", ...num(1, 20) }];
+    const edit = (x) => editDialog(x ? "Edit festival" : "Add festival", fields, x ? { ...x, make_peak: !!x.peak && !!x.peak.active, ...(x.peak || {}) } : { kind: "festival", make_peak: false }, (v) => api("/api/admin/festivals", { ...v, id: x && x.id }), reload);
+    return adminSection("Festivals", "Add festival", () => edit(), h("div", null, h("p", { class: "muted" }, "Enter festival dates yourself: nothing is calculated or assumed. Ticking peak dates creates a peak period for those dates, so the guest price, the availability calendar and the booking limits follow the festival (see also Peak periods)."),
+      adminTable("Festivals", ["Festival", "Dates", "Peak pricing", "Status", "Actions"], ex.festivals.map((x) => h("tr", null, h("td", null, h("strong", null, x.name), h("div", { class: "small muted" }, x.kind + (x.note ? ": " + x.note : ""))), h("td", null, fmtDate(x.start_date) + (x.end_date !== x.start_date ? " to " + fmtDate(x.end_date) : "")),
+        h("td", null, x.peak ? (x.peak.active ? `+${x.peak.surcharge_percent || 0}%${x.peak.max_nights ? ", max " + x.peak.max_nights + " nights" : ""}${x.peak.max_rooms ? ", max " + x.peak.max_rooms + " rooms" : ""}` : "Off") : "None"), h("td", null, yn(x.active)),
+        adminActions(() => edit(x), x.name, extraToggle("festivals", x, x.name, reload)))), "No festivals yet. Add the dates you know; guests see only what is listed.")));
+  },
+  panchanga: (d, reload) => {
+    const rows = d.extras.panchanga, fields = [{ name: "day", label: "Date", type: "date", req: true }, { name: "tithi", label: "Tithi", max: 100 }, { name: "nakshatra", label: "Nakshatra", max: 100 }, { name: "note", label: "Note", max: 100 }];
+    const add = (x) => editDialog("Panchanga entry", fields, x || {}, (v) => api("/api/admin/panchanga", v), reload);
+    const imp = () => editDialog("Import panchanga", [{ name: "import", label: "One line per day: date, tithi, nakshatra, note (for example 2027-01-12,Shukla Dwadashi,Rohini,)", type: "textarea", max: 20000, req: true }], {}, (v) => api("/api/admin/panchanga", v), reload);
+    return adminSection("Panchanga", "Add entry", () => add(), h("div", null, h("div", { class: "actions" }, h("button", { class: "btn secondary", type: "button", onclick: imp }, "Import lines")),
+      h("p", { class: "muted" }, "Guests see these entries on the Festivals page. Copy them from a published panchanga you trust: the app never calculates or guesses them."),
+      adminTable("Panchanga", ["Date", "Tithi", "Nakshatra", "Note", "Actions"], rows.map((x) => h("tr", null, h("td", null, fmtDate(x.day)), h("td", null, x.tithi || ""), h("td", null, x.nakshatra || ""), h("td", null, x.note || ""),
+        adminActions(() => add(x), fmtDate(x.day), h("button", { class: "btn small secondary", type: "button", "aria-label": "Delete " + x.day, onclick: async () => { try { await api("/api/admin/panchanga", { delete: x.day }); reload(); } catch (e) { toast(e.message); } } }, "Delete")))), "No entries yet.")));
+  },
+  roles: (d) => {
+    const roles = [["front_desk", "Front desk"], ["property_manager", "Manager"], ["super_admin", "Super admin"], ["housekeeping", "Housekeeping"], ["viewer", "Viewer"]];
+    return adminSection("Roles and permissions", null, null, h("div", null, h("p", { class: "muted" }, "What each role may do. The server enforces this on every request, whatever the menu shows. Sensitive actions (IDs, money, cancellations, users, settings) are written to the audit log. Change a person's role under Users."),
+      h("div", { class: "scroll", role: "region", "aria-label": "Permissions by role", tabindex: "0" }, h("table", null, h("caption", null, "Permissions by role"),
+        h("thead", null, h("tr", null, h("th", { scope: "col" }, "Permission"), roles.map(([, l]) => h("th", { scope: "col" }, l)))),
+        h("tbody", null, d.permissions.map((p) => h("tr", null, h("td", null, p.label), roles.map(([k, l]) => h("td", { "aria-label": `${l}: ${p.roles.includes(k) ? "allowed" : "not allowed"}` }, p.roles.includes(k) ? "✓" : "–")))))))));
   },
   settings: (d, reload) => {
     const s = d.settings, R = d.setting_ranges, err = h("p", { class: "msg error", role: "alert", hidden: true });
-    const field = (k, label, extra) => h("div", null, h("label", { for: "s_" + k, class: "req" }, label), h("input", { id: "s_" + k, name: k, value: s[k], required: true, ...extra }));
+    const field = (k, label, extra, req = true) => h("div", null, h("label", { for: "s_" + k, class: req ? "req" : null }, label), h("input", { id: "s_" + k, name: k, value: s[k], required: req, ...extra }));
     const f = h("form", { class: "card", "aria-label": "Booking settings", style: "display:grid;gap:1rem;max-width:40rem" },
       h("label", { style: "display:flex;gap:.5rem;align-items:center" }, h("input", { type: "checkbox", id: "s_enabled", checked: s.guest_booking_enabled === "1" }), "Online booking is open to guests"),
       h("div", { class: "grid2" }, [["guest_max_rooms", 0], ["guest_advance_days", 1], ["guest_max_nights", 2], ["guest_cancel_cutoff_hours", 3]].map(([k]) => field(k, R[k][2], { type: "number", min: R[k][0], max: R[k][1], inputmode: "numeric" })),
         field("checkin_time", "Check-in time", { type: "time" }), field("checkout_time", "Check-out time", { type: "time" })),
+      h("div", null, h("h3", null, "Refund policy shown to guests"), h("p", { class: "hint" }, "Leave empty until decided: nothing is shown to guests for an empty item. The cancellation cutoff above is the same value guests are held to."),
+        h("div", { class: "grid2" }, [["refund_percent", R.refund_percent], ["refund_days", R.refund_days]].map(([k, r]) => field(k, r[2], { type: "number", min: r[0], max: r[1], inputmode: "numeric" }, false)))),
+      h("div", null, h("h3", null, "Price rules shown in the guests' price breakdown"), h("p", { class: "hint" }, "Leave a rule empty to not charge it. Nothing is assumed: tax rates and charges are for you to decide (check the current GST rules for your room tariffs)."),
+        h("div", { class: "grid2" }, [["tax_percent", "Tax added to room charges, %"], ["advance_percent", "Advance, % of the total"], ["extra_bed_price", "Extra bed per night, Rs"], ["extra_bed_max", "Most extra beds per room"], ["child_price", "Child charge per night, Rs"]]
+          .map(([k, l]) => field(k, l, { type: "number", min: 0, step: k === "extra_bed_max" ? 1 : "any", inputmode: "decimal" }, false))),
+        h("label", { style: "display:flex;gap:.5rem;align-items:center;margin-top:.5rem" }, h("input", { type: "checkbox", id: "s_childcap", checked: s.child_counts_capacity !== "0" }), "Children count towards the room's capacity")),
+      h("div", null, h("h3", null, "Payments"), h("p", { class: "hint" }, d.payment_provider ? `Online payment provider: ${d.payment_provider}${d.payment_provider === "mock" ? " (test only: no money is taken)" : ""}. UPI, cards and net banking are offered through it.` : "No payment provider is configured (PAYMENT_PROVIDER in the server settings), so guests can only pay at the counter whatever is ticked here. The secure-payment note is shown to guests only when online payment is on."),
+        h("fieldset", { id: "s_pay" }, h("legend", null, "Payment options guests can choose"), [["full", "Pay the full amount online"], ["advance", "Pay an advance online (needs the advance % above)"], ["counter", "Pay at the counter"]].map(([k, l]) =>
+          h("label", { style: "display:flex;gap:.5rem;align-items:center" }, h("input", { type: "checkbox", name: "pay_opt", value: k, checked: (s.pay_options || "counter").split(",").includes(k) }), l)))),
+      h("div", null, h("h3", null, "Messages to guests"), h("p", { class: "hint" }, `Confirmations, changes and cancellations go by SMS${d.whatsapp_provider ? ", WhatsApp" : ""} and email (when the guest gave an address). Leave the reminder days empty to send no arrival reminders.`),
+        h("div", { class: "grid2" }, field("reminder_days", "Arrival reminder: days before check-in", { type: "number", min: 0, max: 14, inputmode: "numeric" }, false), field("reminder_hour", "Send reminders from this hour (0 to 23)", { type: "number", min: 0, max: 23, inputmode: "numeric" }),
+          field("feedback_days", "Ask for feedback: days after check-out (empty = off)", { type: "number", min: 0, max: 30, inputmode: "numeric" }, false))),
+      h("div", null, h("h3", null, "Guest ID documents"), h("p", { class: "hint" }, "IDs recorded at check-in are stored encrypted and erased this many days after the stay ends. Empty means they are kept until you set a period: decide it with your privacy advisers."),
+        h("div", { class: "grid2" }, field("id_retention_days", "Keep IDs for (days after the stay)", { type: "number", min: 1, max: 3650, inputmode: "numeric" }, false),
+          field("guest_retention_days", "Keep guest names, mobiles and emails for (days after the last stay)", { type: "number", min: 30, max: 3650, inputmode: "numeric" }, false)),
+        h("p", { class: "hint" }, "Guests whose last stay ended longer ago than this are erased automatically (booking rows stay, without names or numbers). A super admin can also erase one guest on request."),
+        h("label", { style: "display:flex;gap:.5rem;align-items:center;margin-top:.5rem" }, h("input", { type: "checkbox", id: "s_reqid", checked: s.checkin_requires_id !== "0" }), "Check-in needs the guest's ID recorded first")),
       err, h("div", null, h("button", { class: "btn", type: "submit" }, "Save settings")));
     f.addEventListener("submit", async (e) => {
       e.preventDefault(); err.hidden = true;
       if (!f.reportValidity()) return;
-      const body = Object.fromEntries([...new FormData(f)]); body.guest_booking_enabled = $("#s_enabled").checked;
+      const body = Object.fromEntries([...new FormData(f)]); body.guest_booking_enabled = $("#s_enabled").checked; body.child_counts_capacity = $("#s_childcap").checked;
+      body.checkin_requires_id = $("#s_reqid").checked; body.pay_options = [...f.querySelectorAll("input[name=pay_opt]:checked")].map((i) => i.value); delete body.pay_opt;
       try { await api("/api/admin/settings", body); toast("Settings saved."); await reload(); } catch (x) { err.textContent = x.message; err.hidden = false; }
     });
     return adminSection("Booking settings", null, null, f);
   },
 };
-const ADMIN_TABS = [["properties", "Properties"], ["room_types", "Room types"], ["rooms", "Rooms"], ["users", "Users"], ["peak_periods", "Peak periods"], ["settings", "Settings"]];
+const ADMIN_TABS = [["properties", "Properties"], ["room_types", "Room types"], ["rooms", "Rooms"], ["users", "Users"], ["peak_periods", "Peak periods"], ["promos", "Promo codes"], ["site_config", "Site info"], ["faqs", "FAQ"], ["sevas", "Sevas"], ["packages", "Packages"], ["festivals", "Festivals"], ["panchanga", "Panchanga"], ["roles", "Roles"], ["settings", "Settings"]];
 async function adminView(root) {
   const out = h("div", null);
   const draw = () => { if (A.data) out.replaceChildren(ADMIN_SECTIONS[A.tab](A.data, load)); };  // a tab click before the first load finishes waits for it
@@ -456,6 +965,7 @@ function editDialog(title, fields, vals, save, reload) {
     const id = "a_" + x.name, v = vals[x.name] ?? "";
     if (x.type === "checks") return h("fieldset", { id }, h("legend", null, x.label), h("div", { class: "grid2" }, x.options.map(([ov, ol]) =>
       h("label", { style: "display:flex;gap:.5rem;align-items:center" }, h("input", { type: "checkbox", name: x.name, value: ov, checked: (v || []).includes(ov) }), ol))));
+    if (x.type === "bool") return h("label", { style: "display:flex;gap:.5rem;align-items:center" }, h("input", { id, type: "checkbox", checked: !!v }), x.label);
     const input = x.type === "select" ? h("select", { id, required: x.req, disabled: x.disabled }, x.options.map(([ov, ol]) => opt(ov, ol, v)))
       : x.type === "textarea" ? h("textarea", { id, maxlength: x.max, value: v })
       : h("input", { id, type: x.type || "text", required: x.req, maxlength: x.max, min: x.min, max: x.hi, value: v, autocomplete: "off" });
@@ -468,7 +978,7 @@ $("#aform").addEventListener("submit", async (e) => {
   e.preventDefault(); const btn = $("#a_submit"); $("#a_err").hidden = true;
   if (!$("#aform").reportValidity()) return;
   const body = {};
-  AD.fields.forEach((x) => { body[x.name] = x.type === "checks" ? [...$("#aform").querySelectorAll(`input[name="${x.name}"]:checked`)].map((i) => Number(i.value)) : $("#a_" + x.name).value; });
+  AD.fields.forEach((x) => { body[x.name] = x.type === "checks" ? [...$("#aform").querySelectorAll(`input[name="${x.name}"]:checked`)].map((i) => Number(i.value)) : x.type === "bool" ? $("#a_" + x.name).checked : $("#a_" + x.name).value; });
   btn.disabled = true;
   try { await AD.save(body); $("#adlg").close(); toast("Saved."); await AD.reload(); }
   catch (x) { $("#a_err").textContent = x.message; $("#a_err").hidden = false; }
@@ -487,8 +997,8 @@ function openBook(room, pre) {  // pre: a call-back request, pre-fills the dates
   f.reset(); $("#b_err").hidden = true;
   $("#b_prop").replaceChildren(...props.map((p) => opt(p.id, p.name, room ? room.property_id : (pre && pre.property_id) || S.prop || props[0].id)));
   $("#b_idtype").replaceChildren(...S.meta.id_types.map((x) => opt(x, x)));
-  const ci = pre ? (pre.check_in < t ? t : pre.check_in) : room ? S.date || t : t;
-  $("#b_in").min = t; $("#b_in").value = ci; $("#b_out").value = pre && pre.check_out > ci ? pre.check_out : addDay(ci, 1); $("#b_out").min = addDay(ci, 1);
+  const ci = pre && pre.check_in ? (pre.check_in < t ? t : pre.check_in) : room ? S.date || t : t;
+  $("#b_in").min = t; $("#b_in").value = ci; $("#b_out").value = pre && pre.check_out && pre.check_out > ci ? pre.check_out : addDay(ci, 1); $("#b_out").min = addDay(ci, 1);
   $("#b_darshan").min = t;
   if (pre) { $("#b_name").value = pre.name; $("#b_phone").value = pre.phone; }
   fillRooms($("#b_prop"), $("#b_room"), $("#b_in").value, room && room.id);

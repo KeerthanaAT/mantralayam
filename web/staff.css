@@ -37,3 +37,24 @@ td.actions .btn + .btn { margin-left: var(--s2); }
   nav.main ul { flex-direction: row; flex-wrap: wrap; }
   nav.main a { padding: var(--s2) var(--s3); }
 }
+
+.bad { color: var(--error); }
+.plain { list-style: none; margin: 0; padding: 0; }
+.notes li { padding: var(--s1) 0; border-top: 1px solid var(--border); }
+.hk-cols { display: grid; gap: var(--s4); grid-template-columns: 1fr; align-items: start; }
+@media (min-width: 700px) { .hk-cols { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 1100px) { .hk-cols { grid-template-columns: repeat(5, 1fr); } }
+.hk-list { display: grid; gap: var(--s2); }
+.hk-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); padding: var(--s3); display: grid; gap: var(--s1); }
+.hk-card.warn { border-color: var(--error); }
+.hk-card .actions { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s1); }
+table.cal { font-size: .8rem; }
+.cal th, .cal td { padding: 2px; text-align: center; }
+.cal th[scope=row] { text-align: left; white-space: nowrap; padding: var(--s1) var(--s2); }
+.cal-d { min-width: 3.2rem; }
+.cal-cell { width: 100%; min-width: 2.75rem; min-height: 2.75rem; border: 1px solid var(--border); border-radius: 6px; color: var(--text); cursor: pointer; font-size: .9rem; }
+.cal-cell:not([class*="s-"]) { background: transparent; }
+.cal-cell:hover { border-color: var(--gold); }
+@media print { .hk-card .actions { display: none; } }
+.rep { display: grid; gap: var(--s3); }
+.rep .head .actions { display: flex; gap: var(--s2); flex-wrap: wrap; }

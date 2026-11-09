@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&family=Noto+Serif+Devanagari:wght@400;500;600;700&family=Noto+Serif+Kannada:wght@400;500;600;700&family=Noto+Serif+Tamil:wght@400;500;600;700&family=Noto+Serif+Telugu:wght@400;500;600;700&display=swap");
 /* Design tokens shared by the guest website (/) and the staff app (/staff).
    Theme: dark temple-brown, cream text, burnt-orange accent (Sri Raghavendra Swamy Matha portal style).
    Every colour, font and spacing value lives here only: change a value once and both sites follow. */
@@ -39,13 +39,22 @@
   --st-out_of_service: var(--error);
   --st-neutral: var(--text-muted);
 
-  --font-serif: "Cinzel", "Cormorant Garamond", Georgia, serif;
-  --font-sans: "Inter", system-ui, "Segoe UI", sans-serif;
+  --font-serif: "Lora", "Noto Serif Telugu", "Noto Serif Kannada", "Noto Serif Tamil", "Noto Serif Devanagari", Georgia, serif; /* Lora for Latin; Noto Serif per Indic script, since Lora has none */
+  --font-sans: var(--font-serif);
   --s1: .25rem; --s2: .5rem; --s3: .75rem; --s4: 1rem; --s6: 1.5rem; --s8: 2rem; --s12: 3rem; --s16: 4rem; --s24: 6rem;
   --r: 12px;        /* buttons, inputs, small controls */
   --r-card: 24px;   /* cards, panels, tables, dialogs */
   --blur: blur(12px);
 }
+
+/* Display modes (set by the guest page's buttons, remembered in the browser): larger text and high contrast */
+html[data-text="large"] { font-size: 132.8125%; }  /* 1.25 x the 106.25% base */
+html[data-contrast="high"] {
+  --bg: #1A0F08; --bg-gradient: linear-gradient(#1A0F08, #1A0F08); --surface: #2A180E; --border: #F8ECD2; --text: #FFFFFF; --text-muted: #FFFFFF;
+  --gold: #FFD27A; --success: #9CF2A8; --error: #FF9C8A; --error-text: #FFB4A6; --accent: #8F2A0C; --on-accent: #FFFFFF; --field: #3A2417; --focus: #FFD27A;
+}
+html[data-contrast="high"] a { text-decoration: underline; }
+html[data-contrast="high"] :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 
 /* Printing: swap to a light warm paper scheme so cream text never prints on a white page */
 @media print {

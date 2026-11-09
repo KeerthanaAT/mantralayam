@@ -1,6 +1,6 @@
 /* Staff app components (header, buttons, fields, badges, dialog). Colours and fonts come from tokens.css. */
 * { box-sizing: border-box; }
-html { font-size: 106.25%; } /* 17px base for readability */
+html { font-size: 106.25%; font-family: var(--font-sans); } /* 17px base for readability */
 body { margin: 0; background: var(--glow) no-repeat top / 100% 70vh fixed, var(--bg-gradient) fixed, var(--bg); min-height: 100vh; color: var(--text); font: 1rem/1.5 var(--font-sans); }
 h1, h2, h3 { font-family: var(--font-serif); font-variant: small-caps; letter-spacing: .04em; font-weight: 600; color: var(--text); line-height: 1.25; margin: 0; }
 h1 { font-size: 1.6rem; } h2 { font-size: 1.2rem; } h3 { font-size: 1.05rem; }
@@ -100,4 +100,4 @@ dialog .foot { display: flex; flex-wrap: wrap; gap: var(--s3); justify-content: 
 nav.main a, header .btn { white-space: nowrap; }
 @media (max-width: 1360px) { .who { display: none; } }
 /* A single checkbox with its label beside it */
-.check1 { display: flex; gap: var(--s2); align-items: center; font-weight: 400; margin: 0; color: var(--text); }
+.check1 { min-height: 44px; display: flex; gap: var(--s2); align-items: center; font-weight: 400; margin: 0; color: var(--text); }
