@@ -29,7 +29,8 @@ import totp
 from mantralayam_rooms import UserError
 
 STATIC = {"/": ("staff.html", "text/html"), "/staff": ("staff.html", "text/html"), "/staff.css": ("staff.css", "text/css"),
-          "/tokens.css": ("tokens.css", "text/css"), "/shared.css": ("shared.css", "text/css")}
+          "/tokens.css": ("tokens.css", "text/css"), "/shared.css": ("shared.css", "text/css"),
+          "/i18n.js": ("i18n.js", "application/javascript"), "/locales/en.json": ("locales/en.json", "application/json")}  # the staff app is English only: the same texts file, no other language
 IMAGES = {"/images/logo-transparent.png": "image/png"}  # served from <project root>/images, allowlisted
 ALL = {"super_admin", "property_manager", "front_desk", "housekeeping", "viewer"}
 MGR = {"super_admin", "property_manager"}
@@ -160,7 +161,7 @@ def meta(conn, c):
         "can": {"book": u["role"] in DESK, "status": u["role"] in DESK, "clean": u["role"] in CLEANERS, "audit": u["role"] in MGR, "admin": u["role"] == "super_admin",
                 "desk": u["role"] in perm("booking.checkin"), "id_reveal": u["role"] in perm("id.reveal"), "payments": u["role"] in perm("payment.view"), "refund": u["role"] in perm("payment.refund"),
                 "record_payment": u["role"] in perm("payment.record"), "callbacks": u["role"] in perm("callback.work"), "messages": u["role"] in perm("messages.view"),
-                "cancel_paid": u["role"] in perm("booking.cancel_paid"), "notices": u["role"] in perm("notice.edit"), "report_export": u["role"] in perm("report.export")},
+                "cancel_paid": u["role"] in perm("booking.cancel_paid"), "notices": u["role"] in perm("notice.edit"), "report_export": u["role"] in perm("report.export"), "booking_export": u["role"] in perm("booking.export")},
         "permissions": allowed_for(u["role"]),
         "totp": {"applies": u["role"] in TOTP_ROLES, "enabled": bool(u["totp_enabled"]), "required": TOTP_REQUIRED and u["role"] in TOTP_ROLES and not u["totp_enabled"]},
         "pages": [{"key": k, "label": l} for k, l, roles in PAGES if u["role"] in roles]}
@@ -254,25 +255,185 @@ def dashboard(conn, c):
             "rooms": dict(counts), "total_rooms": len(rooms)} | ({"backup": g.last_backup()} if c.user["role"] == "super_admin" else {}) | ({"alerts": g.check_alerts(conn)} if c.user["role"] in MGR else {})
 
 
+SOURCE_GROUP = {"online": "website", "website": "website", "front_desk": "walk_in", "walk_in": "walk_in", "phone": "phone", "email": "email"}  # anything else is "other"
+SOURCE_ORDER = ("website", "walk_in", "phone", "email", "other")
+LIVE = ("Confirmed", "Checked-In", "Checked-Out")  # stays that count as business done or to be done (not cancelled, not no-show)
+
+
+def net_money_by_day(conn, ids, start, end):
+    """{ISO day: [collected, refunded]} in paise for days start..end (inclusive): paid `payments` by paid_at, `processed` refunds by updated_at, for properties ids."""
+    out = defaultdict(lambda: [0, 0])
+    for d, amt in conn.execute(f"SELECT substr(paid_at, 1, 10), SUM(amount_paise) FROM payments WHERE status = 'paid' AND property_id IN ({marks(ids)}) "
+                               "AND substr(paid_at, 1, 10) BETWEEN ? AND ? GROUP BY 1", (*ids, start, end)):
+        out[d][0] += amt
+    for d, amt in conn.execute(f"SELECT substr(r.updated_at, 1, 10), SUM(r.amount_paise) FROM refunds r JOIN payments p ON p.id = r.payment_row "
+                               f"WHERE r.status = 'processed' AND p.property_id IN ({marks(ids)}) AND substr(r.updated_at, 1, 10) BETWEEN ? AND ? GROUP BY 1", (*ids, start, end)):
+        out[d][1] += amt
+    return out
+
+
+def stay_availability(conn, user, pid, ci, co):
+    """Every active room of the user's properties for the nights ci..co-1 as available / occupied (booked or held) / blocked, with totals and a by-room-type breakdown."""
+    ids = scope(user, pid)
+    free = {r["id"] for r in g.free_rooms(conn, ci, co) if r["property_id"] in ids}
+    rooms = conn.execute(f"SELECT r.id, r.number, r.floor, r.property_id, t.name AS type FROM rooms r JOIN room_types t ON t.id = r.room_type_id "
+                         f"WHERE r.active = 1 AND r.property_id IN ({marks(ids)}) ORDER BY r.property_id, r.floor, r.number", ids).fetchall()
+    rid = [r["id"] for r in rooms]
+    c1, c2, t = ci.isoformat(), co.isoformat(), g.today().isoformat()
+    booked = {r[0] for r in conn.execute(f"SELECT room_id FROM bookings WHERE room_id IN ({marks(rid)}) AND status IN ('Confirmed', 'Checked-In') AND check_in < ? AND check_out > ?", (*rid, c2, c1))}
+    held = {r[0] for r in conn.execute(f"SELECT room_id FROM holds WHERE room_id IN ({marks(rid)}) AND expires_at > ? AND check_in < ? AND check_out > ?", (*rid, g.now_iso(), c2, c1))}
+    if ci <= g.today():  # a guest still checked in after their check-out date is still in the room: it is not free, even though free_rooms() only looks at the dates
+        booked |= {r[0] for r in conn.execute(f"SELECT room_id FROM bookings WHERE room_id IN ({marks(rid)}) AND status = 'Checked-In' AND check_out <= ?", (*rid, t))}
+    grid, types, totals = [], {}, {"available": 0, "occupied": 0, "blocked": 0}
+    for r in rooms:
+        state = "occupied" if r["id"] in booked or r["id"] in held else "available" if r["id"] in free else "blocked"  # blocked: status events, or the room's type or building is switched off
+        totals[state] += 1
+        row_ = types.setdefault(r["type"], {"type": r["type"], "total": 0, "available": 0, "occupied": 0, "blocked": 0})
+        row_["total"] += 1
+        row_[state] += 1
+        grid.append({"id": r["id"], "number": r["number"], "floor": r["floor"], "property_id": r["property_id"], "type": r["type"], "state": state,
+                     "detail": "held" if state == "occupied" and r["id"] in held and r["id"] not in booked else None})
+    return {"check_in": c1, "check_out": c2, "nights": (co - ci).days, "total": len(rooms)} | totals | {"by_type": list(types.values()), "rooms": grid}
+
+
+def staff_dashboard(conn, c):
+    """GET /api/staff/dashboard[?property_id=&from=&to=]: everything the Dashboard page shows, for the user's properties only.
+    Operational cards for everyone; guest lists and booking sources for roles that may see bookings; money (month cards, revenue chart) for managers and super admin only;
+    the backup line for the super admin. Keys the role may not see are absent, not zeroed."""
+    u, t = c.user, g.today()
+    ids = scope(u, c.q.get("property_id"))
+    ci = day(c.q.get("from") or t.isoformat(), "From")
+    co = day(c.q.get("to") or (ci + timedelta(days=1)).isoformat(), "To")
+    if co <= ci or (co - ci).days > 31:
+        raise UserError("The availability range must be 1 to 31 nights, with the last date after the first.")
+    ts, base = t.isoformat(), BOOKING_SQL + f" WHERE b.property_id IN ({marks(ids)}) AND "
+
+    def lst(cond, order, *args, limit=300):
+        return [row(r) for r in conn.execute(base + cond + f" ORDER BY {order} LIMIT {limit}", (*ids, *args))]
+    board_now = board(conn, u, c.q.get("property_id"), ts)
+    sellable = sum(1 for r in board_now if r["status"] not in ("blocked", "maintenance", "out_of_service"))  # rooms that could be sold tonight
+    taken = sum(1 for r in board_now if r["status"] in ("occupied", "booked"))
+    out = {"today": ts, "can_act": u["role"] in DESK, "property_ids": ids,
+           "occupancy": {"occupied": taken, "sellable": sellable, "total": len(board_now), "percent": round(100 * taken / sellable) if sellable else 0},
+           "availability": stay_availability(conn, u, c.q.get("property_id"), ci, co)}
+    if u["role"] in FRONT:
+        arr = lst(f"b.check_in = ? AND b.status IN {LIVE}", "p.name, r.number", ts)
+        dep = lst("((b.check_out = ? AND b.status IN ('Checked-In', 'Checked-Out')) OR (b.check_out < ? AND b.status = 'Checked-In'))", "b.check_out, p.name, r.number", ts, ts)
+        out["arrivals"] = {"count": len(arr), "checked_in": sum(1 for b in arr if b["status"] != "Confirmed"), "list": arr}
+        out["departures"] = {"count": len(dep), "checked_out": sum(1 for b in dep if b["status"] == "Checked-Out"), "overdue": sum(1 for b in dep if b["check_out"] < ts), "list": dep}
+        out["recent"] = lst("b.status IN ('Confirmed', 'Checked-In', 'Checked-Out', 'Cancelled', 'No-Show')", "b.id DESC", limit=8)
+        first, picked = (t - timedelta(days=29)).isoformat(), {}
+        for r in conn.execute(f"SELECT MIN(source) AS source, COUNT(*) AS n FROM bookings WHERE property_id IN ({marks(ids)}) AND substr(created_at, 1, 10) >= ? GROUP BY COALESCE(group_id, id)", (*ids, first)):
+            k = SOURCE_GROUP.get(r["source"], "other")
+            picked[k] = picked.get(k, 0) + 1
+        out["sources"] = {"from": first, "to": ts, "items": [{"source": k, "count": picked[k]} for k in SOURCE_ORDER if picked.get(k)]}
+    if u["role"] in MGR:
+        month, first30 = ts[:8] + "01", (t - timedelta(days=29)).isoformat()
+        nxt = (t.replace(day=1) + timedelta(days=32)).replace(day=1)
+        days_ = net_money_by_day(conn, ids, min(month, first30), ts)
+        rupee = lambda p: g.payments.rupees(p)
+        series = [{"date": (d := (t - timedelta(days=29 - i)).isoformat()), "collected": rupee(days_[d][0]), "refunded": rupee(days_[d][1]), "net": rupee(days_[d][0] - days_[d][1])} for i in range(30)]
+        month_net = sum(v[0] - v[1] for d, v in days_.items() if d >= month)
+        today_net = days_[ts][0] - days_[ts][1] if ts in days_ else 0
+        dues, owing = 0, 0  # stays checking in this month that are not paid in full (cancelled and no-show are not owed)
+        for gr in conn.execute(f"SELECT COALESCE(group_id, id) AS gid, SUM(COALESCE(amount, 0)) AS total FROM bookings WHERE property_id IN ({marks(ids)}) AND status IN {LIVE} "
+                               "AND check_in >= ? AND check_in < ? GROUP BY 1", (*ids, month, nxt.isoformat())):
+            bal = g.payments.to_paise(gr["total"]) - g.payments.money_state(conn, gr["gid"])["net"]
+            if bal > 0:
+                dues, owing = dues + bal, owing + 1
+        out["cash_today"] = rupee(today_net)
+        out["month"] = {"from": month, "net_revenue": rupee(month_net), "expenses": 0.0, "profit": 0.0, "outstanding": rupee(dues), "outstanding_bookings": owing, "expenses_module": False}
+        out["revenue_series"] = series
+    if u["role"] in MGR:
+        out["alerts"] = g.check_alerts(conn)
+    if u["role"] == "super_admin":
+        out["backup"] = g.last_backup()
+    return out
+
+
 def rooms_view(conn, c):
     return board(conn, c.user, c.q.get("property_id"), day(c.q.get("date") or g.today().isoformat(), "Date").isoformat())
 
 
-def bookings_list(conn, c):
-    ids, sql, args = scope(c.user, c.q.get("property_id")), BOOKING_SQL + " WHERE b.property_id IN (%s)", []
-    sql %= marks(ids)
-    args += ids
-    if c.q.get("status"):
-        sql += " AND b.status = ?"
-        args.append(c.q["status"])
-    if c.q.get("date"):
+# The Reservations list. Sort values are a fixed whitelist: the text that reaches SQL is one of these constants, never anything the caller sent.
+SORTS = {"checkin_desc": "b.check_in DESC, b.id DESC", "checkin_asc": "b.check_in ASC, b.id ASC", "checkout_desc": "b.check_out DESC, b.id DESC",
+         "checkout_asc": "b.check_out ASC, b.id ASC", "booked_desc": "b.created_at DESC, b.id DESC"}  # the booking id breaks ties, so a page never repeats or skips a row
+DEFAULT_SORT = "checkin_desc"
+TAB_STATUS = {"checked_in": "Checked-In", "checked_out": "Checked-Out", "confirmed": "Confirmed", "cancelled": "Cancelled", "no_show": "No-Show"}  # "all" has no status
+LIST_SQL = BOOKING_SQL.replace(" FROM bookings b", ", t.name AS room_type, b.payment_status, b.created_at, CAST(julianday(b.check_out) - julianday(b.check_in) AS INTEGER) AS nights FROM bookings b", 1)     + " JOIN room_types t ON t.id = r.room_type_id"
+PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX = 20, 100
+EXPORT_MAX = 10_000
+
+
+def list_filters(c):
+    """(where clause, args) for the filters that shape both the list and the tab counts: property scope, search, date. The status filter is applied separately."""
+    ids = scope(c.user, c.q.get("property_id"))
+    sql, args = f" WHERE b.property_id IN ({marks(ids)})", list(ids)
+    if c.q.get("date"):  # the old "staying on" filter
         sql += " AND b.check_in <= ? AND b.check_out > ?"
         args += [day(c.q["date"], "Date").isoformat()] * 2
+    lo = day(c.q["from"], "From").isoformat() if c.q.get("from") else None
+    hi = day(c.q["to"], "To").isoformat() if c.q.get("to") else None
+    if lo and hi and hi < lo:
+        raise UserError("The last check-in date cannot be before the first.")
+    if lo:
+        sql += " AND b.check_in >= ?"
+        args.append(lo)
+    if hi:
+        sql += " AND b.check_in <= ?"
+        args.append(hi)
     if c.q.get("q", "").strip():
         t = c.q["q"].strip()[:60]
         sql += " AND (b.guest_name LIKE ? OR b.phone LIKE ? OR r.number LIKE ? OR CAST(b.id AS TEXT) = ?)"
         args += [f"%{t}%", f"%{t}%", f"%{t}%", t]
-    return [row(r) for r in conn.execute(sql + " ORDER BY b.check_in DESC, b.id DESC LIMIT 300", args)]
+    return sql, args
+
+
+def list_sort(c):
+    key = c.q.get("sort") or DEFAULT_SORT
+    if key not in SORTS:
+        raise UserError("Unknown sort. Choose one of: " + ", ".join(SORTS) + ".")
+    return key
+
+
+def bookings_list(conn, c):
+    """GET /api/bookings. Filters: property_id, q, date (staying on), from/to (check-in range), status (a booking status), sort (see SORTS).
+    Without page, page_size or counts the reply is the old plain list (up to 300 rows). With any of them it is {items, total, page, page_size, pages, sort, counts}: total is for the
+    chosen status, counts are for the six tabs (all, checked_in, checked_out, confirmed, cancelled, no_show) under the same property, search and date filters."""
+    where, args = list_filters(c)
+    order = SORTS[list_sort(c)]
+    status = c.q.get("status") or ""
+    paged = any(k in c.q for k in ("page", "page_size", "counts"))
+    base = LIST_SQL
+    if not paged:
+        sql, a = base + where + (" AND b.status = ?" if status else "") + f" ORDER BY {order} LIMIT 300", args + ([status] if status else [])
+        return [row(r) for r in conn.execute(sql, a)]
+    given = lambda k, d: d if c.q.get(k) in (None, "") else c.q[k]  # 0 is a value (and refused below), not "missing"
+    size = g.to_int(given("page_size", PAGE_SIZE_DEFAULT), f"The page size must be between 1 and {PAGE_SIZE_MAX}.", 1, PAGE_SIZE_MAX)
+    page = g.to_int(given("page", 1), "The page number must be 1 or more.", 1, 10**6)
+    by_status = {r[0]: r[1] for r in conn.execute("SELECT b.status, COUNT(*) FROM bookings b JOIN rooms r ON r.id = b.room_id" + where + " GROUP BY b.status", args)}
+    counts = {"all": sum(by_status.values())} | {k: by_status.get(v, 0) for k, v in TAB_STATUS.items()}
+    total = counts["all"] if not status else by_status.get(status, 0)
+    sql = base + where + (" AND b.status = ?" if status else "") + f" ORDER BY {order} LIMIT ? OFFSET ?"
+    items = [row(r) for r in conn.execute(sql, args + ([status] if status else []) + [size, (page - 1) * size])]
+    return {"items": items, "total": total, "page": page, "page_size": size, "pages": max(1, -(-total // size)), "sort": list_sort(c), "counts": counts}
+
+
+def bookings_csv(conn, c):
+    """GET /api/bookings/csv: the filtered list (same filters and sort as the page, every page) as a CSV download. Holds guest names and mobile numbers, so it is permissioned
+    and every download is audited with the filters and the row count."""
+    where, args = list_filters(c)
+    status = c.q.get("status") or ""
+    sql = LIST_SQL + where + (" AND b.status = ?" if status else "") + f" ORDER BY {SORTS[list_sort(c)]} LIMIT {EXPORT_MAX + 1}"
+    rows = [row(r) for r in conn.execute(sql, args + ([status] if status else []))]
+    if len(rows) > EXPORT_MAX:
+        raise UserError(f"That is more than {EXPORT_MAX:,} bookings. Narrow the dates or the search and try again.")
+    t = {"columns": ["Booking ID", "Guest", "Mobile", "Property", "Room", "Room type", "Check-in", "Check-out", "Nights", "Guests", "Amount (Rs)", "Payment", "Status", "Source", "Booked on"],
+         "rows": [[b["id"], b["guest_name"], b["phone"], b["property"], b["room"], b["room_type"], b["check_in"], b["check_out"], b["nights"], b["guests"], b["amount"] or 0,
+                   b["payment_status"] or "", b["status"], b["source"] or "", (b["created_at"] or "")[:10]] for b in rows]}
+    shown = ", ".join(f"{k}={c.q[k]}" for k in ("status", "q", "from", "to", "date", "property_id") if c.q.get(k)) or "no filters"
+    g.write(conn, lambda: audit(conn, c.user, "booking.export", None, None, None, f"{len(rows)} booking(s) as CSV ({shown})"))
+    return {"_bytes": g.reports.to_csv(t), "_ctype": "text/csv", "_filename": f"reservations-{g.today().isoformat()}.csv"}
 
 
 def why_not_free(conn, room, ci, co):
@@ -410,6 +571,23 @@ ACTIONS = {"checkin": ("Checked-In", ("Confirmed",), dict(verb="checked in", aud
            "cancel": ("Cancelled", ("Confirmed",), dict(verb="cancelled", audit="booking.cancel", check=NOOP, hint=" Use Check-out for guests who are in the room."), DESK)}
 
 
+def edit_event(conn, c):
+    """POST /api/room_events/<id>/edit: change what a block says (status, issue category, reason, available-again date). The start date stays; the checks are those of a new block."""
+    def work():
+        e = conn.execute("SELECT e.*, r.number, r.property_id FROM room_status_events e JOIN rooms r ON r.id = e.room_id WHERE e.id = ? AND e.active = 1",
+                         (g.to_int(c.args["id"], "Invalid id.", 1, 10**12),)).fetchone()
+        if not e or e["property_id"] not in c.user["props"]:
+            raise UserError("That status entry no longer exists or was already cleared.", 404)
+        if e["kind"] in CLEANING:
+            raise UserError("A cleaning task cannot be edited. Mark the room ready instead.", 409)
+        kind, start, end, cat, reason = event_input(c.body, day(e["start_date"], "Start date"))
+        block_clash(conn, e["room_id"], e["number"], start, end)
+        conn.execute("UPDATE room_status_events SET kind = ?, issue_category = ?, reason = ?, end_date = ? WHERE id = ?", (kind, cat, reason, end.isoformat() if end else None, e["id"]))
+        audit(conn, c.user, "room.block_edit", e["property_id"], e["room_id"], f"{e['kind']} to {e['end_date'] or 'until cleared'}", f"{kind} to {end or 'until cleared'}", reason)
+    g.write(conn, work)
+    return {"ok": True}
+
+
 def events_list(conn, c):
     ids = scope(c.user, c.q.get("property_id"))
     return [dict(r) for r in conn.execute(
@@ -417,12 +595,12 @@ def events_list(conn, c):
         f"WHERE e.active = 1 AND r.property_id IN ({marks(ids)}) ORDER BY p.name, r.number", ids)]
 
 
-def create_event(conn, c):
-    b, u = c.body, c.user
+def event_input(b, start=None):
+    """The checked fields of a room block: (kind, start, end, category, reason). start: the stored start date when an existing block is edited."""
     kind = b.get("kind")
     if kind not in KINDS:
         raise UserError("Please choose a valid status.")
-    start = day(b.get("start_date") or g.today().isoformat(), "Start date")
+    start = start or day(b.get("start_date") or g.today().isoformat(), "Start date")
     end = day(b.get("end_date"), "Available-again date") if b.get("end_date") else None
     if kind != "out_of_service" and not end:
         raise UserError("Please choose the date the room becomes available again.")
@@ -434,16 +612,26 @@ def create_event(conn, c):
     reason = str(b.get("reason") or "").strip()
     if not reason or len(reason) > 300:
         raise UserError("Please give a reason (up to 300 characters).")
+    return kind, start, end, cat, reason
+
+
+def block_clash(conn, room_id, number, start, end):
+    """A room with a live booking in the period cannot be blocked for it."""
+    hit = conn.execute("SELECT id, check_in, check_out FROM bookings WHERE room_id = ? AND status IN ('Confirmed', 'Checked-In') AND check_in < ? AND check_out > ?",
+                       (room_id, (end or date(9999, 1, 1)).isoformat(), start.isoformat())).fetchone()
+    if hit:
+        raise UserError(f"Room {number} has a booking (#{hit['id']}, {hit['check_in']} to {hit['check_out']}) in that period. Cancel or move the booking first.", 409)
+
+
+def create_event(conn, c):
+    b, u = c.body, c.user
+    kind, start, end, cat, reason = event_input(b)
 
     def work():
         room = conn.execute("SELECT * FROM rooms WHERE id = ? AND active = 1", (b.get("room_id"),)).fetchone()
         if not room or room["property_id"] not in u["props"]:
             raise UserError("Please choose an active room in a property you can access.")
-        far = (end or date(9999, 1, 1)).isoformat()
-        hit = conn.execute("SELECT id, check_in, check_out FROM bookings WHERE room_id = ? AND status IN ('Confirmed', 'Checked-In') AND check_in < ? AND check_out > ?",
-                           (room["id"], far, start.isoformat())).fetchone()
-        if hit:
-            raise UserError(f"Room {room['number']} has a booking (#{hit['id']}, {hit['check_in']} to {hit['check_out']}) in that period. Cancel or move the booking first.", 409)
+        block_clash(conn, room["id"], room["number"], start, end)
         cur = conn.execute("INSERT INTO room_status_events (room_id, kind, issue_category, reason, start_date, end_date, created_by, created_at) VALUES (?,?,?,?,?,?,?,?)",
                            (room["id"], kind, cat, reason, start.isoformat(), end.isoformat() if end else None, u["id"], datetime.now().isoformat(timespec="seconds")))
         audit(conn, u, "room.block", room["property_id"], room["id"], None, f"{kind} from {start}" + (f" to {end}" if end else ""), reason)
@@ -491,8 +679,8 @@ def audit_view(conn, c):
 
 # ---------- menu pages, extra screens ----------
 FRONT = DESK | {"viewer"}  # everyone who may see guest details
-PAGES = [("today", "Dashboard", ALL), ("desk", "Front desk", DESK), ("bookings", "Bookings", FRONT), ("callbacks", "Call-backs", FRONT), ("calendar", "Calendar", FRONT), ("rooms", "Rooms", ALL),
-         ("housekeeping", "Housekeeping", CLEANERS), ("status", "Room status", ALL), ("payments", "Payments", MGR), ("messages", "Messages", MGR), ("notices", "Notices", DESK), ("feedback", "Feedback", MGR), ("broadcasts", "Broadcasts", MGR), ("guests", "Guests", FRONT), ("rates", "Rooms & rates", MGR), ("reports", "Reports", MGR),
+PAGES = [("today", "Dashboard", ALL), ("bookings", "Reservations", FRONT), ("calendar", "Calendar", FRONT), ("rooms", "Rooms", ALL),
+         ("housekeeping", "Housekeeping", CLEANERS), ("guests", "Guests", FRONT), ("rates", "Rooms & rates", MGR), ("reports", "Reports", MGR),
          ("notifications", "Notifications", ALL), ("audit", "Audit log", MGR), ("admin", "Admin", frozenset({"super_admin"})), ("settings", "Settings", ALL)]
 STATUS_LIVE = ("Confirmed", "Checked-In", "Checked-Out")
 
@@ -1331,6 +1519,7 @@ def admin_settings(conn, c):
 PERMS = {
     "booking.create": (DESK, "Create walk-in bookings, edit and reschedule bookings"),
     "booking.checkin": (DESK, "Check guests in and out, mark no-shows"),
+    "booking.export": (DESK, "Download the filtered reservations list as CSV (logged)"),
     "booking.cancel": (DESK, "Cancel a booking that has no money received"),
     "booking.cancel_paid": (MGR, "Cancel a booking that has been paid (this starts the refund)"),
     "id.capture": (DESK, "Record a guest's ID at check-in (type, number, photo)"),
@@ -1350,7 +1539,7 @@ PERMS = {
     "audit.view": (MGR, "Read the audit log"),
     "admin": (SUPER, "Change settings, rates, rooms and users"),
 }
-SENSITIVE = ("broadcast.", "report.", "id.", "payment.", "refund.", "booking.cancel", "booking.online_cancel", "booking.reschedule", "booking.edit", "room.block", "room.release", "callback.close", "admin.", "user.", "auth.login_failed", "guest.")
+SENSITIVE = ("broadcast.", "report.", "booking.export", "id.", "payment.", "refund.", "booking.cancel", "booking.online_cancel", "booking.reschedule", "booking.edit", "room.block", "room.release", "callback.close", "admin.", "user.", "auth.login_failed", "guest.")
 
 
 def allowed_for(role):
@@ -1543,13 +1732,68 @@ def housekeeping_view(conn, c):
     return {"today": t, "rooms": out, "counts": dict(counts)}
 
 
+def room_layers(blocks, cleans, booking):
+    """The states of one room, strongest first: a block hides cleaning, cleaning hides the guest. The first is the ONE state staff see;
+    the second is what the room falls back to when the first is cleared. Always ends with checked_in, booked or available."""
+    out = ["blocked"] if blocks else []
+    if cleans:
+        out.append("cleaning" if any(e["kind"] == "in_cleaning" for e in cleans) else "to_clean")
+    out.append("checked_in" if booking and booking["status"] == "Checked-In" else "booked" if booking else "available")
+    return out
+
+
+def rooms_board(conn, c):
+    """GET /api/rooms/board?property_id=&date=: every room with one state for the day: available, booked, checked_in, to_clean, cleaning or blocked.
+    The Rooms page reads only this. Cleaning tasks, today's arrivals and 'ready since' describe now, so they are left out for any other day."""
+    ids, t = scope(c.user, c.q.get("property_id")), g.today().isoformat()
+    d = day(c.q.get("date") or t, "Date").isoformat()
+    live = d == t
+    rooms = conn.execute(f"SELECT r.id, r.number, r.floor, r.capacity, r.property_id, p.name AS property, t.name AS type FROM rooms r JOIN properties p ON p.id = r.property_id "
+                         f"JOIN room_types t ON t.id = r.room_type_id WHERE r.active = 1 AND r.property_id IN ({marks(ids)}) ORDER BY p.id, r.floor, r.number", ids).fetchall()
+    rid = [r["id"] for r in rooms]
+    ev = defaultdict(list)
+    for e in active_events(conn, rid, d):
+        if live or e["kind"] in BLOCKING:
+            ev[e["room_id"]].append(e)
+    stay, arriving = {}, {}
+    # a guest who is checked in keeps the room today even after the check-out date; 'Checked-In' sorts before 'Confirmed'
+    for b in conn.execute(f"SELECT id, room_id, guest_name, status, check_in, check_out, arrival_time FROM bookings WHERE room_id IN ({marks(rid)}) AND status IN ('Confirmed', 'Checked-In') "
+                          "AND check_in <= ? AND (check_out > ? OR (status = 'Checked-In' AND ? = 1)) ORDER BY status, check_in", (*rid, d, d, int(live))):
+        stay.setdefault(b["room_id"], b)
+        if live and b["status"] == "Confirmed" and b["check_in"] == d:
+            arriving[b["room_id"]] = b
+    ready_since = {r[0]: r[1] for r in conn.execute(f"SELECT room_id, MAX(closed_at) FROM room_status_events WHERE active = 0 AND kind IN ('cleaning_required', 'in_cleaning') AND room_id IN ({marks(rid)}) GROUP BY room_id", rid)} if live else {}
+    out, counts = [], defaultdict(int)
+    for r in rooms:
+        blocks, cleans = [e for e in ev[r["id"]] if e["kind"] in BLOCKING], [e for e in ev[r["id"]] if e["kind"] in CLEANING]
+        layers, b, arr = room_layers(blocks, cleans, stay.get(r["id"])), stay.get(r["id"]), arriving.get(r["id"])
+        e = max(blocks, key=lambda x: BLOCKING.index(x["kind"])) if blocks else next((x for x in cleans if x["kind"] == "in_cleaning"), cleans[0] if cleans else None)
+        state = layers[0]
+        counts[state] += 1
+        out.append(dict(r) | {"state": state, "under": layers[1] if len(layers) > 1 else None, "event_id": e["id"] if e else None, "kind": e["kind"] if e else None,
+                              "category": e["issue_category"] if e else None, "reason": e["reason"] if e else None, "since": e["start_date"] if e else None, "until": e["end_date"] if e else None,
+                              "booking_id": b["id"] if b else None, "guest": b["guest_name"] if b else None, "check_in": b["check_in"] if b else None, "check_out": b["check_out"] if b else None,
+                              "arrival": {"guest": arr["guest_name"], "time": arr["arrival_time"]} if arr else None, "flag": bool(arr and state in ("to_clean", "cleaning", "blocked")),
+                              "ready_since": ready_since.get(r["id"]) if state == "available" else None})
+    return {"today": t, "date": d, "rooms": out, "counts": dict(counts)}
+
+
+def room_history(conn, c):
+    """GET /api/rooms/<id>/history: who changed this room's status and when. Only the room.* entries of the audit log, and only user, action and time:
+    the rest of the log (bookings, IDs, money, sign-ins) stays with the managers."""
+    room = conn.execute("SELECT id, property_id FROM rooms WHERE id = ?", (g.to_int(c.args["id"], "Invalid id.", 1, 10**12),)).fetchone()
+    if not room or room["property_id"] not in c.user["props"]:
+        raise UserError("Room not found.", 404)
+    return [dict(r) for r in conn.execute("SELECT ts, username, action FROM audit_log WHERE room_id = ? AND action LIKE 'room.%' ORDER BY id DESC LIMIT 8", (room["id"],))]
+
+
 def room_needs_cleaning(conn, c):
     """POST /api/rooms/<id>/needs_cleaning: marks a room as waiting for cleaning (for example a room left without a check-out)."""
     def work():
         room = conn.execute("SELECT * FROM rooms WHERE id = ? AND active = 1", (g.to_int(c.args["id"], "Invalid id.", 1, 10**12),)).fetchone()
         if not room or room["property_id"] not in c.user["props"]:
             raise UserError("Room not found.", 404)
-        if conn.execute("SELECT 1 FROM room_status_events WHERE room_id = ? AND active = 1 AND kind IN ('cleaning_required', 'in_cleaning', 'internal_block', 'maintenance', 'out_of_service')", (room["id"],)).fetchone():
+        if active_events(conn, [room["id"]], g.today().isoformat()):  # a block that has ended, or starts later, is not a status today: the board shows the room as usable, so it can be flagged
             raise UserError(f"Room {room['number']} already has a status: clear it first.", 409)
         conn.execute("INSERT INTO room_status_events (room_id, kind, reason, start_date, created_by, created_at) VALUES (?, 'cleaning_required', ?, ?, ?, ?)",
                      (room["id"], str(c.body.get("reason") or "Marked for cleaning").strip()[:200] or "Marked for cleaning", g.today().isoformat(), c.user["id"], now_iso()))
@@ -1980,10 +2224,11 @@ def subscriber_unsubscribe(conn, c):
 
 R = lambda method, pattern, fn, roles: (method, re.compile(pattern + r"\Z"), fn, roles)
 ROUTES = [R("POST", r"/api/login", login, None), R("POST", r"/api/logout", logout, ALL), R("GET", r"/api/meta", meta, ALL),
-          R("GET", r"/api/dashboard", dashboard, ALL), R("GET", r"/api/rooms", rooms_view, ALL), R("GET", r"/api/bookings", bookings_list, FRONT),
+          R("GET", r"/api/dashboard", dashboard, ALL), R("GET", r"/api/staff/dashboard", staff_dashboard, ALL), R("GET", r"/api/rooms", rooms_view, ALL), R("GET", r"/api/bookings", bookings_list, FRONT), R("GET", r"/api/bookings/csv", bookings_csv, perm("booking.export")),
           R("POST", r"/api/bookings", create_booking, DESK), R("GET", r"/api/availability", availability, DESK), R("GET", r"/api/room_events", events_list, ALL), R("POST", r"/api/room_events", create_event, DESK),
           R("POST", r"/api/room_events/(?P<id>\d+)/release", lambda conn, c: event_action(conn, c, True), CLEANERS),
           R("POST", r"/api/room_events/(?P<id>\d+)/start_cleaning", lambda conn, c: event_action(conn, c, False), CLEANERS),
+          R("POST", r"/api/room_events/(?P<id>\d+)/edit", edit_event, DESK), R("GET", r"/api/rooms/board", rooms_board, ALL), R("GET", r"/api/rooms/(?P<id>\d+)/history", room_history, ALL),
           R("GET", r"/api/audit", audit_view, MGR),
           R("POST", r"/api/bookings/(?P<id>\d+)/edit", edit_booking, DESK), R("POST", r"/api/bookings/(?P<id>\d+)/reschedule", reschedule_booking, DESK),
           R("GET", r"/api/callbacks", callbacks_list, FRONT), R("POST", r"/api/callbacks/(?P<id>\d+)/status", callback_status, perm("callback.work")),

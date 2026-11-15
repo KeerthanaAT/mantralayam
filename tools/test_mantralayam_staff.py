@@ -6,7 +6,7 @@ import re
 import shutil
 import sqlite3
 import tempfile
-from datetime import timedelta
+from datetime import date as date_, timedelta
 from pathlib import Path
 
 import mantralayam_rooms as g
@@ -154,8 +154,10 @@ def test_all():
     pages = lambda u: [p["key"] for p in call(u, "GET", "/api/meta")[1]["pages"]]
     assert set(pages("admin")) == set(pages("manager")) | {"admin"} and "reports" in pages("admin") and "rates" in pages("admin")
     assert "reports" not in pages("frontdesk") and "rates" not in pages("frontdesk") and "audit" not in pages("frontdesk") and "settings" in pages("frontdesk")
-    assert pages("housekeeping") == ["today", "rooms", "housekeeping", "status", "notifications", "settings"]
-    assert "desk" in pages("frontdesk") and "payments" not in pages("frontdesk") and "messages" not in pages("frontdesk") and {"payments", "messages", "desk"} <= set(pages("manager")) and "desk" not in pages("viewer") and "desk" not in pages("housekeeping")
+    assert pages("housekeeping") == ["today", "rooms", "housekeeping", "notifications", "settings"]  # Room status is part of Rooms now
+    assert "housekeeping" in pages("frontdesk") and "housekeeping" not in pages("viewer")  # the Housekeeping tab is for the roles that may clean
+    REMOVED = {"desk", "callbacks", "payments", "messages", "notices", "feedback", "broadcasts"}  # taken off the menu on request; their routes and permissions still work and are covered by test_staff_desk.py and test_extras.py
+    assert not any(REMOVED & set(pages(u)) for u in ("admin", "manager", "frontdesk", "housekeeping", "viewer")), "removed pages must not be in any menu"
     for u in ("frontdesk", "housekeeping", "viewer"):
         for path in ("/api/reports", "/api/room_types", "/api/settings"):
             assert call(u, "GET", path)[0] == 403, (u, path)
@@ -530,7 +532,7 @@ def test_callbacks():
     assert saved[0] == "contacted" and saved[1] == db.execute("SELECT id FROM users WHERE username = 'frontdesk'").fetchone()[0] and saved[2]
     audit = db.execute("SELECT action, username, property_id, old_value, new_value FROM audit_log WHERE action LIKE 'callback.%' AND action != 'callback.request' ORDER BY id").fetchall()
     assert audit == [("callback.contacted", "frontdesk", 1, "new", "contacted"), ("callback.closed", "manager", None, "new", "closed")], audit
-    assert "callbacks" in [p["key"] for p in call("viewer", "GET", "/api/meta")[1]["pages"]] and "callbacks" not in [p["key"] for p in call("housekeeping", "GET", "/api/meta")[1]["pages"]]
+    assert not any("callbacks" in [p["key"] for p in call(u, "GET", "/api/meta")[1]["pages"]] for u in ("viewer", "housekeeping", "frontdesk"))  # off the menu; the call-back routes still work
     db.close()
 
 
@@ -717,6 +719,333 @@ def test_staff_features():
     db.close()
 
 
+def test_rooms_page():
+    """The merged Rooms page: one state per room (GET /api/rooms/board), editing a block, a room's history, the roles, and the old Room status link."""
+    # the state rule on its own: a block hides cleaning, cleaning hides the guest; what is underneath comes second
+    L, ev = s.room_layers, lambda *kinds: [{"kind": k} for k in kinds]
+    assert L([], [], None) == ["available"] and L([], [], {"status": "Confirmed"}) == ["booked"] and L([], [], {"status": "Checked-In"}) == ["checked_in"]
+    assert L([], ev("cleaning_required"), None) == ["to_clean", "available"]
+    assert L([], ev("cleaning_required", "in_cleaning"), {"status": "Checked-In"}) == ["cleaning", "checked_in"]
+    assert L(ev("maintenance"), ev("cleaning_required"), {"status": "Confirmed"}) == ["blocked", "to_clean", "booked"]
+
+    board = lambda user, **q: call(user, "GET", "/api/rooms/board", q)
+    at = lambda rid, **q: next(r for r in board("frontdesk", **q)[1]["rooms"] if r["id"] == rid)
+    post = lambda user, path, data=None: call(user, "POST", path, data or {})
+    # every role reads it, inside its own properties; each room has exactly one of the six states
+    assert board("nobody")[0] == 401 and board("frontdesk", property_id=3)[0] == 403 and board("frontdesk", date="soon")[0] == 400
+    for u in ("admin", "manager", "frontdesk", "housekeeping", "viewer"):
+        st, out = board(u)
+        assert st == 200 and out["date"] == out["today"] == D(0) and sum(out["counts"].values()) == len(out["rooms"]) > 0, (u, out)
+        assert {r["state"] for r in out["rooms"]} <= {"available", "booked", "checked_in", "to_clean", "cleaning", "blocked"}
+    assert {r["property_id"] for r in board("frontdesk")[1]["rooms"]} <= {1, 2}
+    # it never disagrees with the two views it replaces
+    same = {"available": ("available",), "booked": ("booked",), "occupied": ("checked_in",), "cleaning": ("to_clean", "cleaning"), "blocked": ("blocked",), "maintenance": ("blocked",), "out_of_service": ("blocked",)}
+    new = {r["id"]: r for r in board("frontdesk")[1]["rooms"]}
+    old = call("frontdesk", "GET", "/api/rooms")[1]
+    assert len(old) == len(new) and all(new[r["id"]]["state"] in same[r["status"]] for r in old), [(r["number"], r["status"], new[r["id"]]["state"]) for r in old if new[r["id"]]["state"] not in same[r["status"]]]
+    assert all(new[r["id"]]["state"] == r["state"] for r in call("frontdesk", "GET", "/api/housekeeping")[1]["rooms"] if r["state"] in ("blocked", "to_clean", "cleaning"))
+
+    # one room through a stay: booked, checked in, flagged on check-out, being cleaned, available
+    room = free_room("frontdesk")
+    rid = room["id"]
+    assert at(rid)["state"] == "available" and at(rid)["under"] is None
+    st, b = post("frontdesk", "/api/bookings", guest(room, arrival_time="23:30"))
+    assert st == 200, b
+    r = at(rid)
+    assert (r["state"], r["guest"], r["booking_id"], r["flag"]) == ("booked", "Walk In", b["id"], False) and r["arrival"]["guest"] == "Walk In", r
+    assert post("frontdesk", f"/api/bookings/{b['id']}/checkin")[0] == 200 and at(rid)["state"] == "checked_in" and at(rid)["arrival"] is None
+    assert post("viewer", f"/api/rooms/{rid}/needs_cleaning")[0] == 403, "the viewer changes nothing"
+    assert post("housekeeping", f"/api/rooms/{rid}/needs_cleaning")[0] == 200
+    r = at(rid)
+    assert (r["state"], r["under"], r["kind"], r["guest"]) == ("to_clean", "checked_in", "cleaning_required", "Walk In"), r
+    assert post("housekeeping", f"/api/room_events/{r['event_id']}/release")[0] == 200 and at(rid)["state"] == "checked_in"
+    assert post("frontdesk", f"/api/bookings/{b['id']}/checkout")[0] == 200
+    r = at(rid)
+    assert (r["state"], r["under"], r["guest"]) == ("to_clean", "available", None), "check-out flags the room by itself"
+    assert at(rid, date=D(3))["state"] == "available", "cleaning describes today: another day shows the room as it will be"
+    assert "to_clean" not in board("frontdesk", date=D(3))[1]["counts"] and "cleaning" not in board("frontdesk", date=D(3))[1]["counts"]
+    assert post("housekeeping", f"/api/room_events/{r['event_id']}/start_cleaning")[0] == 200 and at(rid)["state"] == "cleaning"
+    assert post("housekeeping", f"/api/room_events/{r['event_id']}/release")[0] == 200
+    assert at(rid)["state"] == "available" and at(rid)["ready_since"], "marked ready from the Rooms page"
+
+    # a block: shown with kind, category, reason and dates; only on the days it covers
+    blk = dict(room_id=rid, kind="maintenance", issue_category="Plumbing", reason="Tap", start_date=D(0), end_date=D(2))
+    st, e = post("frontdesk", "/api/room_events", blk)
+    assert st == 200, e
+    r = at(rid)
+    assert (r["state"], r["kind"], r["category"], r["reason"], r["since"], r["until"], r["under"]) == ("blocked", "maintenance", "Plumbing", "Tap", D(0), D(2), "available"), r
+    assert at(rid, date=D(2))["state"] == "available"
+    assert post("housekeeping", f"/api/rooms/{rid}/needs_cleaning")[0] == 409, "a room blocked today is not flagged for cleaning"
+
+    # editing it: the roles that may block, the same checks as a new block, an audit entry
+    edit = lambda user, **kw: post(user, f"/api/room_events/{e['id']}/edit", dict(kind="maintenance", issue_category="Plumbing", reason="Tap", end_date=D(2)) | kw)
+    assert edit("viewer")[0] == 403 and edit("housekeeping")[0] == 403 and post("frontdesk", "/api/room_events/999999/edit", blk)[0] == 404
+    for patch in (dict(kind="cleaning_required"), dict(issue_category="Magic"), dict(end_date=D(0)), dict(end_date=None), dict(reason=" "), dict(reason="x" * 301)):
+        assert edit("frontdesk", **patch)[0] == 400, patch
+    st, later = post("frontdesk", "/api/bookings", guest(room, check_in=D(4), check_out=D(5)))
+    assert st == 200, later
+    st, out = edit("frontdesk", end_date=D(6))
+    assert st == 409 and "booking" in out["error"], "a block cannot be stretched over a booking"
+    assert post("frontdesk", f"/api/bookings/{later['id']}/cancel", dict(reason="test"))[0] == 200
+    assert edit("frontdesk", kind="out_of_service", issue_category="Electrical", reason="Wiring", end_date=None)[0] in (200, 409)  # open-ended: refused when the room has a booking later on live data
+    assert edit("frontdesk", kind="out_of_service", issue_category="Electrical", reason="Wiring", end_date=D(8))[0] == 200
+    r = at(rid, date=D(7))
+    assert (r["state"], r["kind"], r["category"], r["reason"], r["since"], r["until"]) == ("blocked", "out_of_service", "Electrical", "Wiring", D(0), D(8)), r
+    assert edit("manager", kind="internal_block", issue_category="", reason="Mutt use", end_date=D(1))[0] == 200 and at(rid)["category"] is None
+    other = free_room("admin", pid=3)
+    st, far = post("admin", "/api/room_events", blk | dict(room_id=other["id"]))
+    assert st == 200, far
+    assert post("frontdesk", f"/api/room_events/{far['id']}/edit", blk)[0] == 404, "another property's block"
+    assert post("housekeeping", f"/api/room_events/{e['id']}/release")[0] == 403 and post("frontdesk", f"/api/room_events/{e['id']}/release")[0] == 200
+    assert post("housekeeping", f"/api/rooms/{rid}/needs_cleaning")[0] == 200
+    cid = at(rid)["event_id"]
+    assert post("frontdesk", f"/api/room_events/{cid}/edit", blk)[0] == 409, "a cleaning task is not edited"
+    assert post("housekeeping", f"/api/room_events/{cid}/release")[0] == 200
+
+    # a block that ended but was never cleared is not a status today: the board shows the room as usable, so it can be flagged
+    db = sqlite3.connect(g.DB)
+    db.execute("INSERT INTO room_status_events (room_id, kind, reason, start_date, end_date, created_at) VALUES (?, 'internal_block', 'Old', ?, ?, ?)", (rid, D(-5), D(-1), s.now_iso()))
+    db.commit()
+    db.close()
+    assert at(rid)["state"] == "available" and post("housekeeping", f"/api/rooms/{rid}/needs_cleaning")[0] == 200
+    assert post("housekeeping", f"/api/room_events/{at(rid)['event_id']}/release")[0] == 200
+
+    # history: every role, own properties only, room.* entries only, and nothing but who, what and when
+    assert call("nobody", "GET", f"/api/rooms/{rid}/history")[0] == 401 and call("frontdesk", "GET", f"/api/rooms/{other['id']}/history")[0] == 404 and call("frontdesk", "GET", "/api/rooms/999999/history")[0] == 404
+    for u in ("manager", "frontdesk", "housekeeping", "viewer"):
+        st, rows = call(u, "GET", f"/api/rooms/{rid}/history")
+        assert st == 200 and 0 < len(rows) <= 8 and all(set(x) == {"ts", "username", "action"} and x["action"].startswith("room.") for x in rows), (u, rows)
+    assert [x["action"] for x in rows][:3] == ["room.cleaning_done", "room.cleaning_required", "room.cleaning_done"] and rows[0]["username"] == "housekeeping", rows
+    log = [a for a in call("manager", "GET", "/api/audit")[1] if a["room_id"] == rid]
+    assert {"booking.create", "booking.checkin"} <= {a["action"] for a in log}, "the room's booking entries exist in the audit log, and stay out of its history"
+    edits = [a for a in log if a["action"] == "room.block_edit"]
+    assert len(edits) == 2 and edits[-1]["username"] == "frontdesk" and edits[-1]["old_value"] == f"maintenance to {D(2)}" and edits[-1]["new_value"] == f"out_of_service to {D(8)}" and edits[-1]["reason"] == "Wiring", edits
+    assert post("admin", f"/api/room_events/{far['id']}/release")[0] == 200
+
+    # menu and old links: Room status is gone for every role, Rooms stays for everyone, #/status opens Rooms
+    for u in ("admin", "manager", "frontdesk", "housekeeping", "viewer"):
+        keys = [p["key"] for p in call(u, "GET", "/api/meta")[1]["pages"]]
+        assert "status" not in keys and keys.count("rooms") == 1, (u, keys)
+    assert not any(k == "status" for k, _, _ in s.PAGES)
+    html = (Path(__file__).resolve().parent.parent / "web" / "staff.html").read_text(encoding="utf-8")  # the redirect runs in the browser: check that the page still carries it
+    assert 'const MOVED = { status: "rooms" };' in html and 'if (MOVED[name]) { location.replace("#/" + MOVED[name]); return; }' in html
+    assert "statusView" not in html and '"Room status"' not in html and html.count("async function roomsView(") == 1 and 'rooms: ["Rooms", roomsView]' in html
+    assert "/api/rooms/board?" in html and "hk-board" not in html[html.index("async function housekeepingView("):html.index("// ---------- rooms:")], "Housekeeping keeps the team panel only"
+
+
+def test_staff_dashboard():
+    """GET /api/staff/dashboard: role-shaped output, property scope, availability, money totals, sources."""
+    dash = lambda user, **q: call(user, "GET", "/api/staff/dashboard", q)
+    money_keys = {"month", "cash_today", "revenue_series"}
+    ops_keys = {"today", "occupancy", "availability", "can_act"}
+    assert call("nobody", "GET", "/api/staff/dashboard")[0] == 401
+    outs = {}
+    for u in ("admin", "manager", "frontdesk", "housekeeping", "viewer"):
+        st, outs[u] = dash(u)
+        assert st == 200 and ops_keys <= set(outs[u]), (u, st)
+    # who sees what: money for managers and super admin only, guest lists for roles that may see bookings
+    for u in ("admin", "manager"):
+        assert money_keys <= set(outs[u]), u
+    for u in ("frontdesk", "housekeeping", "viewer"):
+        assert not money_keys & set(outs[u]), (u, "money must be absent, not zeroed")
+    assert {"arrivals", "departures", "recent", "sources"} <= set(outs["frontdesk"]) and {"arrivals", "departures"} <= set(outs["viewer"])
+    assert not {"arrivals", "departures", "recent", "sources"} & set(outs["housekeeping"]), "housekeeping sees no guest data"
+    assert not any("setup" in outs[u] for u in outs), "the setup checklist is gone"
+    assert outs["viewer"]["can_act"] is False and outs["frontdesk"]["can_act"] is True
+    assert "alerts" in outs["admin"] and "alerts" in outs["manager"] and "backup" in outs["admin"]
+    assert not any(k in outs[u] for u in ("frontdesk", "housekeeping", "viewer") for k in ("alerts", "backup")) and "backup" not in outs["manager"]
+    assert {"/i18n.js", "/locales/en.json"} <= set(s.STATIC) and not any(p.startswith("/locales/") and p != "/locales/en.json" for p in s.STATIC)
+    assert len(outs["manager"]["revenue_series"]) == 30 and outs["manager"]["revenue_series"][-1]["date"] == TODAY.isoformat()
+    # property scope: front desk has properties 1 and 2 only
+    assert dash("frontdesk", property_id=3)[0] == 403 and set(outs["frontdesk"]["property_ids"]) == {1, 2}
+    assert dash("frontdesk", property_id=1)[1]["property_ids"] == [1]
+    assert {r["property_id"] for r in outs["frontdesk"]["availability"]["rooms"]} <= {1, 2}
+    # date range rules
+    for q in (dict(**{"from": D(2), "to": D(2)}), dict(**{"from": D(2), "to": D(1)}), dict(**{"from": D(0), "to": D(40)}), dict(**{"from": "x"})):
+        assert dash("frontdesk", **q)[0] == 400, q
+    av = outs["frontdesk"]["availability"]
+    assert av["nights"] == 1 and av["available"] + av["occupied"] + av["blocked"] == av["total"] == len(av["rooms"])
+    assert sum(x["total"] for x in av["by_type"]) == av["total"] and sum(x["available"] for x in av["by_type"]) == av["available"]
+
+    # a walk-in booking: availability drops by one, arrivals, sources and dues move; the double booking stays refused
+    room = free_room("frontdesk", pid=1)
+    nights = 2
+    before = dash("manager", property_id=1, **{"from": D(0), "to": D(nights)})[1]
+    st, b = call("frontdesk", "POST", "/api/bookings", guest(room, check_in=D(0), check_out=D(nights)))
+    assert st == 200, b
+    assert call("frontdesk", "POST", "/api/bookings", guest(room, check_in=D(1), check_out=D(3)))[0] == 409
+    after = dash("manager", property_id=1, **{"from": D(0), "to": D(nights)})[1]
+    assert after["availability"]["available"] == before["availability"]["available"] - 1 and after["availability"]["occupied"] == before["availability"]["occupied"] + 1
+    assert next(r for r in after["availability"]["rooms"] if r["id"] == room["id"])["state"] == "occupied"
+    assert after["arrivals"]["count"] == before["arrivals"]["count"] + 1 and after["arrivals"]["checked_in"] == before["arrivals"]["checked_in"]
+    walk = lambda o: next((x["count"] for x in o["sources"]["items"] if x["source"] == "walk_in"), 0)
+    assert walk(after) == walk(before) + 1
+    assert after["month"]["outstanding_bookings"] == before["month"]["outstanding_bookings"] + 1 and after["month"]["outstanding"] > before["month"]["outstanding"]
+    assert after["month"]["expenses"] == 0 and after["month"]["profit"] == 0 and after["month"]["expenses_module"] is False
+    # check-in moves the arrivals card; occupancy tonight counts the room either way
+    assert call("frontdesk", "POST", f"/api/bookings/{b['id']}/checkin")[0] == 200
+    ci = dash("frontdesk", property_id=1)[1]
+    assert ci["arrivals"]["checked_in"] == before["arrivals"]["checked_in"] + 1 and ci["occupancy"]["occupied"] >= 1
+    assert all(r["status"] in ("Confirmed", "Checked-In", "Checked-Out") for r in ci["arrivals"]["list"]) and {"id", "guest_name", "room"} <= set(ci["arrivals"]["list"][0])
+
+    # money: a counter payment raises cash today and the month; a processed refund comes off both; dues fall as the booking is paid
+    pay = lambda amt: call("admin", "POST", f"/api/bookings/{b['id']}/payment", dict(amount=amt, mode="cash"))
+    cash0, m0 = after["cash_today"], after["month"]
+    assert pay(500)[0] == 200
+    m1 = dash("manager", property_id=1)[1]
+    assert round(m1["cash_today"] - cash0, 2) == 500 and round(m1["month"]["net_revenue"] - m0["net_revenue"], 2) == 500
+    assert round(m0["outstanding"] - m1["month"]["outstanding"], 2) == 500, "dues fall by what was paid"
+    assert m1["revenue_series"][-1]["collected"] >= 500
+    db = sqlite3.connect(g.DB)
+    prow = db.execute("SELECT id FROM payments WHERE group_id = ? ORDER BY id DESC", (b["id"],)).fetchone()[0]
+    ts = g.now_iso()
+    db.execute("INSERT INTO refunds (payment_row, group_id, amount_paise, status, created_at, updated_at) VALUES (?,?,20000,'processed',?,?)", (prow, b["id"], ts, ts))
+    db.execute("INSERT INTO refunds (payment_row, group_id, amount_paise, status, created_at, updated_at) VALUES (?,?,99900,'failed',?,?)", (prow, b["id"], ts, ts))  # a failed refund moved no money
+    db.commit(); db.close()
+    m2 = dash("manager", property_id=1)[1]
+    assert round(m1["cash_today"] - m2["cash_today"], 2) == 200 and round(m1["month"]["net_revenue"] - m2["month"]["net_revenue"], 2) == 200
+    assert m2["revenue_series"][-1]["refunded"] >= 200
+    # property scope for money: a manager of properties 1,2 sees none of property 3's payments
+    assert dash("manager", property_id=3)[0] in (200, 403)
+    for u in ("frontdesk", "viewer", "housekeeping"):
+        assert "cash_today" not in dash(u, property_id=1)[1]
+
+    # a guest still checked in after their check-out date keeps the room occupied for any range that includes today, and does not for a later range
+    late = free_room("frontdesk", pid=1, skip=(room["id"],))
+    db = sqlite3.connect(g.DB)
+    db.execute("INSERT INTO bookings (property_id, room_id, guest_name, phone, id_type, id_number, guests, check_in, check_out, status, source, created_at, status_at, amount) VALUES (1,?,'Late Leaver','9876500000','Aadhaar','****1',1,?,?,'Checked-In','front_desk',?,?,0)",
+               (late["id"], D(-5), D(-3), g.now_iso(), g.now_iso()))
+    db.commit(); db.close()
+    state = lambda **q: next(r["state"] for r in dash("admin", property_id=1, **q)[1]["availability"]["rooms"] if r["id"] == late["id"])
+    assert state(**{"from": D(0), "to": D(1)}) == "occupied" and state(**{"from": D(-1), "to": D(2)}) == "occupied"
+    assert state(**{"from": D(5), "to": D(6)}) == "available"
+    a2 = dash("admin", property_id=1, **{"from": D(0), "to": D(1)})[1]["availability"]
+    assert a2["available"] + a2["occupied"] + a2["blocked"] == a2["total"]
+
+def test_dashboard_recent_noshow():
+    """The stored status is 'No-Show' (capital S). The dashboard's recent list must include such a booking: it once filtered on 'No-show', which matches nothing."""
+    room = free_room("frontdesk", pid=1)
+    db = sqlite3.connect(g.DB)
+    assert db.execute("SELECT COUNT(*) FROM bookings WHERE status = 'No-show'").fetchone()[0] == 0, "the only spelling in the data is No-Show"
+    cur = db.execute("INSERT INTO bookings (property_id, room_id, guest_name, phone, id_type, id_number, guests, check_in, check_out, status, source, created_at, status_at, amount) VALUES (1,?,'No Show Guest','9876500001','Aadhaar','****1',1,?,?,'No-Show','front_desk',?,?,0)",
+                     (room["id"], D(-1), D(0), g.now_iso(), g.now_iso()))
+    db.commit(); db.close()
+    rec = call("frontdesk", "GET", "/api/staff/dashboard", dict(property_id=1))[1]["recent"]
+    assert cur.lastrowid in [b["id"] for b in rec], "a No-Show booking must appear in recent bookings"
+    assert next(b for b in rec if b["id"] == cur.lastrowid)["status"] == "No-Show"
+
+def test_reservations_list():
+    """GET /api/bookings (paged shape): tab counts and filtering, the five sorts, pagination, both response shapes, roles and scope, a hostile sort value, and /api/bookings/csv."""
+    import csv, io
+    db = sqlite3.connect(g.DB)
+    rooms1 = [r[0] for r in db.execute("SELECT id FROM rooms WHERE property_id = 1 AND active = 1 ORDER BY id")]
+    room3 = db.execute("SELECT id FROM rooms WHERE property_id = 3 AND active = 1 ORDER BY id").fetchone()[0]
+    statuses = ["Confirmed"] * 4 + ["Checked-In"] * 3 + ["Checked-Out"] * 2 + ["Cancelled"] * 2 + ["No-Show"]
+    fx = []  # the fixtures: 12 rows of property 1 whose check-in, check-out and booking date all order differently; rows 0 and 1 tie on check-in
+    for i, st in enumerate(statuses):
+        off = 0 if i == 1 else i * 3
+        ci, co = D(200 + off), D(200 + off + 1 + (11 - i) % 4)
+        created = f"2026-{1 + (i * 5) % 9:02d}-{10 + i:02d}T09:00:00"
+        cur = db.execute("INSERT INTO bookings (property_id, room_id, guest_name, phone, id_type, id_number, guests, check_in, check_out, status, source, created_at, status_at, amount, payment_status) "
+                         "VALUES (1,?,?,?,'Aadhaar','****1234',2,?,?,?,'front_desk',?,?,?,?)", (rooms1[i % len(rooms1)], f"ZZRes {i:02d}", f"98000000{i:02d}", ci, co, st, created, created, 600 * (1 + i % 3), "paid" if i % 2 else "due"))
+        fx.append(dict(id=cur.lastrowid, status=st, check_in=ci, check_out=co, created=created))
+    other = db.execute("INSERT INTO bookings (property_id, room_id, guest_name, phone, id_type, id_number, guests, check_in, check_out, status, source, created_at, status_at, amount) "
+                       "VALUES (3,?,'ZZRes Other Property','9800000099','Aadhaar','****1',1,?,?,'Confirmed','front_desk',?,?,0)", (room3, D(210), D(211), g.now_iso(), g.now_iso())).lastrowid
+    db.commit()
+    api = lambda user, **q: call(user, "GET", "/api/bookings", q)
+    mine = {"q": "ZZRes", "property_id": 1}
+    ids = lambda items: [b["id"] for b in items]
+    SORT_KEYS = ("checkin_desc", "checkin_asc", "checkout_desc", "checkout_asc", "booked_desc")
+
+    # tab counts: five tabs plus No-Show, under the search; "all" holds everything, No-Show included
+    st, out = api("frontdesk", page_size=100, **mine)
+    assert st == 200 and set(out) == {"items", "total", "page", "page_size", "pages", "sort", "counts"}, out.keys()
+    assert out["counts"] == {"all": 12, "checked_in": 3, "checked_out": 2, "confirmed": 4, "cancelled": 2, "no_show": 1}, out["counts"]
+    assert out["counts"]["all"] == sum(v for k, v in out["counts"].items() if k != "all") and out["total"] == 12 and out["sort"] == "checkin_desc"
+    # tab filtering: each status shows only itself, its total is its count, the counts do not move, and No-Show is only ever in "all"
+    for key, status in (("checked_in", "Checked-In"), ("checked_out", "Checked-Out"), ("confirmed", "Confirmed"), ("cancelled", "Cancelled"), ("no_show", "No-Show")):
+        st, o = api("frontdesk", status=status, page_size=100, **mine)
+        assert st == 200 and {b["status"] for b in o["items"]} == {status} and o["total"] == out["counts"][key] == len(o["items"]) and o["counts"] == out["counts"], status
+    assert "No-Show" in {b["status"] for b in out["items"]} and len(out["items"]) == 12
+    # counts follow the date and search filters
+    lo, hi = D(200), D(209)
+    st, o = api("frontdesk", page_size=100, **mine, **{"from": lo, "to": hi})
+    want = [f for f in fx if lo <= f["check_in"] <= hi]
+    assert st == 200 and sorted(ids(o["items"])) == sorted(f["id"] for f in want) and o["counts"]["all"] == len(want)
+    assert o["counts"]["confirmed"] == sum(f["status"] == "Confirmed" for f in want) and o["counts"]["no_show"] == sum(f["status"] == "No-Show" for f in want)
+    assert api("frontdesk", page_size=100, **mine, **{"from": hi, "to": lo})[0] == 400 and api("frontdesk", page_size=100, **mine, **{"from": "nope"})[0] == 400
+    o = api("frontdesk", page_size=100, q="ZZRes 03", property_id=1)[1]
+    assert o["counts"]["all"] == 1 and o["items"][0]["guest_name"] == "ZZRes 03"
+    assert api("frontdesk", page_size=100, q=str(fx[4]["id"]), property_id=1)[1]["counts"]["all"] == 1, "search by booking id"
+    assert api("frontdesk", page_size=100, q="9800000005", property_id=1)[1]["counts"]["all"] == 1, "search by phone"
+    assert api("frontdesk", page_size=100, date=fx[5]["check_in"], **mine)[1]["counts"]["all"] >= 1, "the old staying-on date still works"
+
+    # each sort, against the order computed here; ties on the key fall back to the booking id, in the same direction
+    key = lambda f, k: {"checkin": f["check_in"], "checkout": f["check_out"], "booked": f["created"]}[k]
+    for sort in SORT_KEYS:
+        k, rev = sort.split("_")[0], sort.endswith("desc")
+        want = [f["id"] for f in sorted(fx, key=lambda f: (key(f, k), f["id"]), reverse=rev)]
+        st, o = api("frontdesk", sort=sort, page_size=100, **mine)
+        assert st == 200 and ids(o["items"]) == want and o["sort"] == sort, (sort, ids(o["items"]), want)
+    # pagination keeps the sort: three pages of 5 rebuild the whole sorted list with no repeats or gaps
+    for sort in SORT_KEYS:
+        full = ids(api("frontdesk", sort=sort, page_size=100, **mine)[1]["items"])
+        parts = [api("frontdesk", sort=sort, page=n, page_size=5, **mine)[1] for n in (1, 2, 3)]
+        assert [len(x["items"]) for x in parts] == [5, 5, 2] and sum((ids(x["items"]) for x in parts), []) == full and {x["pages"] for x in parts} == {3} and parts[0]["total"] == 12, sort
+    assert api("frontdesk", page=4, page_size=5, **mine)[1]["items"] == []
+    # the tab and the page together: page 2 of the Confirmed tab
+    o = api("frontdesk", status="Confirmed", page=2, page_size=3, **mine)[1]
+    assert o["total"] == 4 and len(o["items"]) == 1 and o["pages"] == 2
+    for bad in (dict(page_size=101), dict(page_size=0), dict(page=0), dict(page="x"), dict(page_size="x")):
+        assert api("frontdesk", **mine, **bad)[0] == 400, bad
+
+    # a hostile or unknown sort is refused and never reaches SQL; the table is intact
+    n = db.execute("SELECT COUNT(*) FROM bookings").fetchone()[0]
+    for bad in ("nope", "b.id; DROP TABLE bookings; --", "checkin_desc, (SELECT 1)", "CHECKIN_DESC", "b.check_in"):
+        for path in ("/api/bookings", "/api/bookings/csv"):
+            st, o = call("frontdesk", "GET", path, dict(sort=bad, page_size=5))
+            assert st == 400 and "Unknown sort" in o["error"], (path, bad, st)
+    assert db.execute("SELECT COUNT(*) FROM bookings").fetchone()[0] == n
+
+    # both response shapes: no paging parameters keeps the old plain list; page_size, page or counts gives the object; the old filters work in both
+    old = api("frontdesk", **mine)[1]
+    assert isinstance(old, list) and len(old) == 12 and all("guest_name" in b for b in old) and ids(old) == ids(api("frontdesk", sort="checkin_desc", page_size=100, **mine)[1]["items"])
+    assert ids(api("frontdesk", sort="booked_desc", **mine)[1]) == [f["id"] for f in sorted(fx, key=lambda f: (f["created"], f["id"]), reverse=True)], "sort also applies to the plain list"
+    assert [b["status"] for b in api("frontdesk", status="Cancelled", **mine)[1]] == ["Cancelled"] * 2
+    assert isinstance(api("frontdesk", counts=1, **mine)[1], dict) and isinstance(api("frontdesk", page=1, **mine)[1], dict) and isinstance(api("frontdesk", page_size=5, **mine)[1], dict)
+    assert api("frontdesk", counts=1, **mine)[1]["page_size"] == 20, "default page size"
+
+    # what a row carries: room type, nights and payment state; only the ID tail
+    b = next(x for x in api("frontdesk", page_size=100, **mine)[1]["items"] if x["id"] == fx[0]["id"])
+    assert b["room_type"] and b["nights"] == (date_.fromisoformat(b["check_out"]) - date_.fromisoformat(b["check_in"])).days and b["payment_status"] == "due" and b["id_tail"] == "…1234" and "id_number" not in b
+    assert b["amount"] == 600 and {"room", "property", "phone", "guests", "status", "created_at"} <= set(b)
+
+    # roles and scope
+    assert api("housekeeping", page_size=5)[0] == 403 and api("housekeeping")[0] == 403 and call("nobody", "GET", "/api/bookings", dict(page_size=5))[0] == 401
+    assert api("viewer", page_size=5, **mine)[0] == 200 and api("manager", page_size=5, **mine)[0] == 200
+    assert api("frontdesk", property_id=3, page_size=5)[0] == 403
+    fd = api("frontdesk", page_size=100, q="ZZRes")[1]
+    assert other not in ids(fd["items"]) and fd["counts"]["all"] == 12 and {b["property_id"] for b in fd["items"]} <= {1, 2}, "front desk never sees property 3"
+    ad = api("admin", page_size=100, q="ZZRes")[1]
+    assert other in ids(ad["items"]) and ad["counts"]["all"] == 13 and ad["counts"]["confirmed"] == 5
+
+    # the export: managers and front desk, not viewers or housekeeping; same filters and sort, every page, audited, formula-safe
+    for u, want in (("manager", 200), ("frontdesk", 200), ("admin", 200), ("viewer", 403), ("housekeeping", 403)):
+        assert call(u, "GET", "/api/bookings/csv", dict(q="ZZRes", property_id=1))[0] == want, u
+    assert call("nobody", "GET", "/api/bookings/csv")[0] == 401 and call("frontdesk", "GET", "/api/bookings/csv", dict(property_id=3))[0] == 403
+    st, out = call("frontdesk", "GET", "/api/bookings/csv", dict(q="ZZRes", property_id=1, status="Cancelled", sort="checkin_asc"))
+    assert st == 200 and out["_ctype"] == "text/csv" and out["_filename"] == f"reservations-{TODAY.isoformat()}.csv" and out["_bytes"].startswith(b"\xef\xbb\xbf")
+    rows = list(csv.reader(io.StringIO(out["_bytes"].decode("utf-8-sig"))))
+    assert rows[0][:3] == ["Booking ID", "Guest", "Mobile"] and len(rows) == 3 and {r[12] for r in rows[1:]} == {"Cancelled"} and not any("ID proof" in c or "Aadhaar" in c for r in rows for c in r)
+    full = list(csv.reader(io.StringIO(call("manager", "GET", "/api/bookings/csv", dict(q="ZZRes", property_id=1))[1]["_bytes"].decode("utf-8-sig"))))
+    assert len(full) == 13 and [int(r[0]) for r in full[1:]] == ids(old), "the export is every row, in the page's default order, not one page"
+    log = db.execute("SELECT username, new_value FROM audit_log WHERE action = 'booking.export' ORDER BY id DESC LIMIT 1").fetchone()
+    assert log[0] == "manager" and "12 booking(s)" in log[1] and "q=ZZRes" in log[1]
+    assert db.execute("SELECT COUNT(*) FROM audit_log WHERE action = 'booking.export'").fetchone()[0] == 5, "every successful download is logged, refusals are not"
+    assert call("frontdesk", "GET", "/api/meta")[1]["can"]["booking_export"] is True and call("viewer", "GET", "/api/meta")[1]["can"]["booking_export"] is False
+    db.close()
+
+
 if __name__ == "__main__":
     try:
         test_all()
@@ -731,6 +1060,10 @@ if __name__ == "__main__":
         test_hold_blocks_walkin()
         test_peak_admin()
         test_staff_features()
+        test_rooms_page()
+        test_staff_dashboard()
+        test_dashboard_recent_noshow()
+        test_reservations_list()
         print("ok")
     finally:
         shutil.rmtree(TMP, ignore_errors=True)

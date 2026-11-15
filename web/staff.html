@@ -102,6 +102,43 @@
   </form>
 </dialog>
 
+<dialog id="ddlg" aria-labelledby="d_title">
+  <div class="detail">
+    <h2 id="d_title"></h2>
+    <div id="d_body"></div>
+  </div>
+</dialog>
+
+<dialog id="edlg" aria-labelledby="edlg-h">
+  <form id="eform" method="dialog" novalidate>
+    <h2 id="edlg-h" data-i18n="staff.edit.title">Edit booking</h2>
+    <p class="muted" id="e_intro"></p>
+    <div><label for="e_name" class="req" data-i18n="staff.edit.name">Guest name</label><input id="e_name" name="guest_name" required maxlength="100" autocomplete="off"></div>
+    <div class="row">
+      <div><label for="e_phone" class="req" data-i18n="staff.edit.phone">Mobile number</label><input id="e_phone" name="phone" type="tel" required inputmode="tel" maxlength="20" autocomplete="off"></div>
+      <div><label for="e_guests" class="req" data-i18n="staff.edit.guests">Guests</label><input id="e_guests" name="guests" type="number" min="1" max="200" required inputmode="numeric"></div>
+    </div>
+    <div><label for="e_remarks" data-i18n="staff.edit.remarks">Remarks (optional)</label><textarea id="e_remarks" name="remarks" maxlength="500"></textarea></div>
+    <p id="e_err" class="msg error" role="alert" hidden></p>
+    <div class="foot"><button type="button" class="btn secondary" id="e_back" data-i18n="staff.edit.close">Close</button><button type="submit" class="btn" id="e_submit" data-i18n="staff.edit.save">Save changes</button></div>
+  </form>
+</dialog>
+
+<dialog id="rdlg" aria-labelledby="rdlg-h">
+  <form id="rform" method="dialog" novalidate>
+    <h2 id="rdlg-h" data-i18n="staff.resched.title">Reschedule booking</h2>
+    <p class="muted" id="r_intro"></p>
+    <div class="row">
+      <div><label for="r_in" class="req" data-i18n="staff.resched.new_in">New check-in</label><input id="r_in" name="check_in" type="date" required></div>
+      <div><label for="r_out" class="req" data-i18n="staff.resched.new_out">New check-out</label><input id="r_out" name="check_out" type="date" required></div>
+    </div>
+    <div><label for="r_room" class="req" data-i18n="staff.resched.room">Room</label><select id="r_room" name="room_id" required></select>
+      <p class="hint" data-i18n="staff.resched.hint">Rooms show their status on the new check-in date. The server checks the whole stay and refuses a double booking.</p></div>
+    <p id="r_err" class="msg error" role="alert" hidden></p>
+    <div class="foot"><button type="button" class="btn secondary" id="r_back" data-i18n="staff.resched.close">Close</button><button type="submit" class="btn" id="r_submit" data-i18n="staff.resched.submit">Reschedule</button></div>
+  </form>
+</dialog>
+
 <dialog id="adlg" aria-labelledby="adlg-h">
   <form id="aform" method="dialog" novalidate>
     <h2 id="adlg-h"></h2>
@@ -115,6 +152,7 @@
 </dialog>
 
 <noscript><p style="padding:2rem">The staff app needs JavaScript.</p></noscript>
+<script src="/i18n.js"></script>
 <script nonce="__NONCE__">
 "use strict";
 // replaceChildren would print the word "null" for an empty slot and "a,b" for an array: skip empty values and flatten lists
@@ -146,8 +184,8 @@ const KIND_LABEL = { internal_block: "Blocked", maintenance: "Maintenance", out_
 
 function toast(msg) { $("#toast").replaceChildren(h("div", { class: "t" }, msg)); clearTimeout(toast.id); toast.id = setTimeout(() => $("#toast").replaceChildren(), 6000); }
 let CSRF = "";  // the CSRF token of this sign-in: sent with every POST so another site cannot act for the signed-in user
-async function api(path, body) {
-  const res = await fetch(path, { method: body === undefined ? "GET" : "POST", headers: { "Content-Type": "application/json", ...(body === undefined ? {} : { "X-CSRF-Token": CSRF }) }, body: body === undefined ? undefined : JSON.stringify(body) });
+async function api(path, body, keep) {  // keep: the request must finish even if the page is closed meanwhile
+  const res = await fetch(path, { method: body === undefined ? "GET" : "POST", keepalive: !!keep, headers: { "Content-Type": "application/json", ...(body === undefined ? {} : { "X-CSRF-Token": CSRF }) }, body: body === undefined ? undefined : JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
   if (data && data.csrf) CSRF = data.csrf;
   if (res.status === 401 && S.meta) { S.meta = null; route(); }
@@ -161,8 +199,8 @@ const opt = (v, l, sel) => h("option", { value: v, selected: String(v) === Strin
 const can = (k) => S.meta.can[k];
 
 // ---------- chrome, routing ----------
-const VIEWS = { today: ["Today", todayView], desk: ["Front desk", deskView], bookings: ["Bookings", bookingsView], callbacks: ["Call-backs", callbacksView], calendar: ["Calendar", calendarView], rooms: ["Rooms", roomsView],
-  housekeeping: ["Housekeeping", housekeepingView], status: ["Room status", statusView], payments: ["Payments", paymentsView], messages: ["Messages", messagesView], notices: ["Notices", noticesView], feedback: ["Feedback", feedbackView], broadcasts: ["Broadcasts", broadcastsView], reports: ["Reports", reportsView], audit: ["Audit log", auditView], admin: ["Admin", adminView], settings: ["Account security", accountView] };
+const VIEWS = { today: ["Today", todayView], desk: ["Front desk", deskView], bookings: ["Reservations", reservationsView], callbacks: ["Call-backs", callbacksView], calendar: ["Calendar", calendarView], rooms: ["Rooms", roomsView],
+  housekeeping: ["Housekeeping", housekeepingView], payments: ["Payments", paymentsView], messages: ["Messages", messagesView], notices: ["Notices", noticesView], feedback: ["Feedback", feedbackView], broadcasts: ["Broadcasts", broadcastsView], reports: ["Reports", reportsView], audit: ["Audit log", auditView], admin: ["Admin", adminView], settings: ["Account security", accountView] };
 
 async function accountView(root) {
   const t = S.meta.totp, err = h("p", { class: "msg error", role: "alert", hidden: true }), setup = h("div");
@@ -200,13 +238,14 @@ async function accountView(root) {
   }
   root.replaceChildren(h("h1", null, "Account security"), err, h("div", { style: "display:grid;gap:1rem" }, twofa, pw));
 }
+const navLabel = (k, label) => ({ today: t("staff.dash.title"), bookings: t("staff.res.title") }[k] || label);  // the pages whose names come from the texts file
 const allowed = (k) => S.meta.pages.some((p) => p.key === k);  // the server lists the pages each role may open, and enforces it on every route
 function chrome() {
   $("#chrome").hidden = !S.meta;
   if (!S.meta) return;
   const cur = location.hash.replace(/^#\/?/, "") || "today";
   $("#navlist").replaceChildren(...Object.entries(VIEWS).filter(([k]) => allowed(k)).map(([k, [label]]) =>
-    h("li", null, h("a", { href: "#/" + (k === "today" ? "" : k), "data-r": k, "aria-current": k === cur ? "page" : null }, label))));
+    h("li", null, h("a", { href: "#/" + (k === "today" ? "" : k), "data-r": k, "aria-current": k === cur ? "page" : null }, navLabel(k, label)))));
   $("#who").replaceChildren(h("strong", null, S.meta.user.full_name), S.meta.user.role.replace("_", " "));
 }
 const propSelect = (onchange) => S.meta.properties.length < 2 ? null : h("div", null, h("label", { for: "f_prop" }, "Property"),
@@ -217,14 +256,16 @@ async function route() {
   if (!S.meta) { try { S.meta = await api("/api/meta"); } catch { chrome(); return loginView(root); } }
   chrome();
   const name = location.hash.replace(/^#\/?/, "").split("/")[0] || "today";
+  if (MOVED[name]) { location.replace("#/" + MOVED[name]); return; }
+  RM.live = false; if (name !== "rooms") rmSend();  // a room change still waiting for Undo is sent before another page opens
   if (S.meta.totp && S.meta.totp.required && name !== "settings") { location.hash = "#/settings"; return; }  // managers and super admins set up two-factor sign-in before anything else
   const [label, fn] = VIEWS[name] && allowed(name) ? VIEWS[name] : VIEWS.today;
-  document.title = label + " · Mantralayam Staff";
+  document.title = navLabel(VIEWS[name] && allowed(name) ? name : "today", label) + " · Mantralayam Staff";
   root.replaceChildren(loading());
   try { await fn(root); } catch (e) { root.replaceChildren(fail(e, route)); }
   const hd = $("h1", root); if (hd) { hd.tabIndex = -1; hd.focus({ preventScroll: true }); }
 }
-window.addEventListener("hashchange", () => { route(); window.scrollTo({ top: 0 }); });
+window.addEventListener("hashchange", () => { RM.y = 0; route(); window.scrollTo({ top: 0 }); });
 $("#signout").onclick = async () => { try { await api("/api/logout", {}); } catch {} S.meta = null; location.hash = "#/"; route(); };
 
 function loginView(root) {
@@ -249,35 +290,6 @@ function loginView(root) {
 }
 
 // ---------- shared pieces ----------
-function bookingTable(rows, caption, empty) {
-  if (!rows.length) return h("section", null, h("h2", null, caption), h("p", { class: "empty card" }, empty));
-  const today = S.meta.today;
-  return h("div", { class: "scroll", role: "region", "aria-label": caption, tabindex: "0" }, h("table", null, h("caption", null, caption),
-    h("thead", null, h("tr", null, ["Booking", "Guest", "Room", "Stay", "Guests", "Status", "Actions"].map((t) => h("th", { scope: "col" }, t)))),
-    h("tbody", null, rows.map((b) => h("tr", null,
-      h("td", null, "#" + b.id, b.source === "online" ? h("div", { class: "small muted" }, "Online") : null),
-      h("td", null, h("strong", null, b.guest_name), h("div", { class: "small muted" }, b.phone, " · ID ", b.id_type, " ", b.id_tail)),
-      h("td", null, b.room, h("div", { class: "small muted" }, b.property)),
-      h("td", null, fmtDate(b.check_in), " to ", fmtDate(b.check_out), b.arrival_time ? h("div", { class: "small" }, "Arrives about " + b.arrival_time) : null,
-        b.darshan_date ? h("div", { class: "small" }, "Darshan " + fmtDate(b.darshan_date)) : null, b.remarks ? h("div", { class: "small muted" }, "Remarks: " + b.remarks) : null,
-        b.cancel_reason ? h("div", { class: "small muted" }, "Reason: " + b.cancel_reason) : null,
-        b.booker_name ? h("div", { class: "small" }, "Booked by " + b.booker_name) : null,
-        b.arrival_contact_name || b.arrival_contact_phone ? h("div", { class: "small" }, "Call on arrival: " + [b.arrival_contact_name, b.arrival_contact_phone].filter(Boolean).join(" · ")) : null,
-        b.promo_code || b.discount_amount ? h("div", { class: "small muted" }, "Discount: " + (b.promo_code && !b.promo_code.startsWith("auto:") ? b.promo_code + " " : "group rate ") + inr.format(b.discount_amount || 0)) : null),
-      h("td", null, b.guests, b.children ? h("div", { class: "small muted" }, b.children + " child" + (b.children > 1 ? "ren" : "")) : null, b.extra_beds ? h("div", { class: "small muted" }, b.extra_beds + " extra bed" + (b.extra_beds > 1 ? "s" : "")) : null),
-      h("td", null, badge(STATUS_CLASS[b.status] || "neutral", b.status)),
-      h("td", { class: "actions" }, can("book") ? bookingActions(b, today) : null))))));
-}
-function bookingActions(b, today) {
-  const btn = (label, cls, fn) => h("button", { class: "btn small " + cls, type: "button", "aria-label": `${label} booking ${b.id}, ${b.guest_name}`, onclick: fn }, label);
-  const out = [];
-  if (b.status === "Confirmed") {
-    if (b.check_in <= today && today < b.check_out) out.push(btn("Check in", "", () => act(b, "checkin", "Checked in.")));
-    if (b.check_in <= today) out.push(btn("No-show", "secondary", () => act(b, "noshow", "Marked as no-show.")));
-    out.push(btn("Cancel", "danger", () => openCancel(b)));
-  } else if (b.status === "Checked-In") out.push(btn("Check out", "", () => act(b, "checkout", "Checked out. The room now needs cleaning.")));
-  return out;
-}
 async function act(b, action, done, body) {
   try { await api(`/api/bookings/${b.id}/${action}`, body || {}); toast(`Booking #${b.id}: ${done}`); route(); }
   catch (e) { toast(e.message); }
@@ -288,60 +300,269 @@ const alertBanner = (list) => list && list.length ? h("div", { class: "msg error
   h("ul", { class: "plain", style: "margin:.5rem 0 0 1.25rem" }, list.map((a) => h("li", null, a.message, a.emailed_at ? null : h("div", { class: "small muted" }, "Not emailed: " + (a.email_note || "email pending")))))) : null;
 const backupLine = (b) => h("p", { class: "small " + (b && !b.ok ? "msg error" : "muted"), role: b && !b.ok ? "alert" : null },
   b ? ["Last backup: ", fmtWhen(b.ts), " ", h("strong", null, b.ok ? "OK" : "FAILED"), b.ok ? null : " (" + b.detail + ")"] : "Last backup: none yet. Run the backup command (see workflows/mantralayam_staff.md).");
+// ---------- dashboard ----------
+// All texts come from web/locales/en.json (t("staff...")). One call, GET /api/staff/dashboard, feeds every section; the server leaves out what the role may not see.
+const SVGNS = "http://www.w3.org/2000/svg";
+function sv(tag, props, ...kids) {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(props || {})) if (v != null && v !== false) e.setAttribute(k, v);
+  kids.flat(Infinity).forEach((k) => { if (k != null && k !== false) e.append(k instanceof Node ? k : document.createTextNode(String(k))); });
+  return e;
+}
+const money0 = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
+const compactNum = new Intl.NumberFormat("en-IN", { notation: "compact", maximumFractionDigits: 1 });
+const dayShort = (s) => new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short" }).format(new Date(s + "T00:00:00"));
+const niceUp = (v) => { if (v <= 0) return 1; const p = 10 ** Math.floor(Math.log10(v)), m = v / p; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p; };
+const DASH = { from: "", to: "" };
+const sourceText = (s) => ({ website: t("staff.source.website"), walk_in: t("staff.source.walk_in"), phone: t("staff.source.phone"), email: t("staff.source.email"), other: t("staff.source.other") }[s] || s);
+
+function statCard(label, value, sub, warn) {
+  return h("li", { class: warn ? "warn" : "" }, h("span", { class: "k" }, label), h("strong", null, value), sub ? h("span", { class: "sub" }, sub) : null);
+}
+
+function revenueChart(series) {
+  const W = innerWidth >= 900 ? 680 : Math.max(280, Math.min(innerWidth - 64, 560)), H = 220, L = 46, R = 8, T = 12, B = 26, pw = W - L - R, ph = H - T - B, n = series.length;
+  const vals = series.map((p) => p.net), mn = Math.min(0, ...vals);
+  const hi = niceUp(Math.max(0, ...vals)), lo = mn < 0 ? -niceUp(-mn) : 0, y = (v) => T + (ph * (hi - v)) / (hi - lo), step = pw / n, bw = Math.max(2, step - 2);
+  const ticks = lo < 0 ? [hi, 0, lo] : [hi, hi / 2, 0];
+  const total = vals.reduce((a, b) => a + b, 0), best = series.reduce((a, b) => (b.net > a.net ? b : a), series[0]);
+  const svg = sv("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img", "aria-label": t("staff.dash.revenue.desc", { total: money0.format(total), best: money0.format(best.net), date: dayShort(best.date) }) },
+    ticks.map((v) => [sv("line", { class: "grid", x1: L, x2: W - R, y1: y(v), y2: y(v) }), sv("text", { x: L - 5, y: y(v) + 3.5, "text-anchor": "end" }, (v < 0 ? "−" : "") + "₹" + compactNum.format(Math.abs(v)))]),
+    series.map((p, i) => {
+      const x = L + i * step + (step - bw) / 2, top = Math.min(y(p.net), y(0)), ht = Math.abs(y(p.net) - y(0));
+      return sv("g", null, sv("title", null, `${dayShort(p.date)}: ${money0.format(p.net)}`), sv("rect", { class: "hit", x: L + i * step, y: T, width: step, height: ph }),
+        p.net ? sv("rect", { class: "bar" + (p.net < 0 ? " neg" : ""), x, y: top, width: bw, height: Math.max(ht, 1.5), rx: 2 }) : null);
+    }),
+    [[0, "start"], [Math.floor((n - 1) / 2), "middle"], [n - 1, "end"]].map(([i, a]) => sv("text", { x: a === "start" ? L : a === "end" ? W - R : L + i * step + step / 2, y: H - 8, "text-anchor": a }, dayShort(series[i].date))));
+  const table = h("details", { class: "chart-table" }, h("summary", null, t("staff.dash.revenue.table")),
+    h("div", { class: "scroll", role: "region", "aria-label": t("staff.dash.revenue.heading"), tabindex: "0" }, h("table", null,
+      h("thead", null, h("tr", null, [t("staff.col.date"), t("staff.col.collected"), t("staff.col.refunded"), t("staff.col.net")].map((c) => h("th", { scope: "col" }, c)))),
+      h("tbody", null, series.slice().reverse().map((p) => h("tr", null, h("th", { scope: "row" }, fmtDate(p.date)), h("td", null, money0.format(p.collected)), h("td", null, money0.format(p.refunded)), h("td", null, money0.format(p.net))))))));
+  return [svg, table];
+}
+
+function sourcesChart(items) {
+  if (!items.length) return h("p", { class: "empty" }, t("staff.dash.sources.none"));
+  const top = Math.max(...items.map((x) => x.count)), sum = items.reduce((a, x) => a + x.count, 0);
+  return h("ul", { class: "plain bars", "aria-label": t("staff.dash.sources.heading") }, items.map((x) => h("li", { title: `${sourceText(x.source)}: ${x.count}` },
+    h("span", { class: "lab" }, sourceText(x.source)), h("span", { class: "track", "aria-hidden": "true" }, h("i", { style: `width:${Math.max(3, (100 * x.count) / top)}%` })),
+    h("strong", null, x.count), h("span", { class: "sub" }, Math.round((100 * x.count) / sum) + "%"))));
+}
+
+function availSection(d, reload) {
+  const a = d.availability, from = h("input", { id: "av_from", type: "date", value: a.check_in }), to = h("input", { id: "av_to", type: "date", value: a.check_out });
+  const form = h("form", { class: "toolbar", onsubmit: (e) => { e.preventDefault(); if (!from.value || !to.value || to.value <= from.value) { toast(t("staff.dash.avail.bad_range")); return; } DASH.from = from.value; DASH.to = to.value; DASH.focus = true; reload(); } },
+    h("div", null, h("label", { for: "av_from" }, t("staff.dash.avail.from")), from), h("div", null, h("label", { for: "av_to" }, t("staff.dash.avail.to")), to),
+    h("button", { class: "btn", type: "submit" }, t("staff.dash.avail.show")));
+  let body;
+  if (!a.total) {
+    body = h("div", { class: "empty card" }, h("p", null, t("staff.dash.avail.none")), can("admin") ? h("a", { class: "btn", href: "#/admin", onclick: () => { A.tab = "rooms"; } }, t("staff.dash.avail.add_rooms")) : h("p", { class: "small" }, t("staff.dash.avail.ask_admin")));
+  } else {
+    body = [h("ul", { class: "dash-cards three" }, statCard(t("staff.dash.avail.available"), a.available, t("staff.dash.rooms_of", { n: a.available, total: a.total })),
+      statCard(t("staff.dash.avail.occupied"), a.occupied), statCard(t("staff.dash.avail.blocked"), a.blocked)),
+    h("div", { class: "scroll", role: "region", "aria-label": t("staff.dash.avail.by_type"), tabindex: "0" }, h("table", null, h("caption", null, t("staff.dash.avail.by_type")),
+      h("thead", null, h("tr", null, [t("staff.dash.avail.col_type"), t("staff.dash.avail.col_total"), t("staff.dash.avail.available"), t("staff.dash.avail.occupied"), t("staff.dash.avail.blocked")].map((c) => h("th", { scope: "col" }, c)))),
+      h("tbody", null, a.by_type.map((r) => h("tr", null, h("th", { scope: "row" }, r.type), h("td", null, r.total), h("td", null, r.available), h("td", null, r.occupied), h("td", null, r.blocked)))))),
+    h("ul", { class: "plain room-grid", "aria-label": t("staff.dash.avail.grid") }, a.rooms.map((r) => h("li", { class: "badge s-" + r.state },
+      h("strong", null, r.number), h("span", null, r.state === "available" ? t("staff.dash.avail.available") : r.state === "blocked" ? t("staff.dash.avail.blocked") : r.detail === "held" ? t("staff.dash.avail.held") : t("staff.dash.avail.occupied")))))];
+  }
+  return h("section", { "aria-labelledby": "avail-h", id: "avail" }, h("div", { class: "head" }, h("h2", { id: "avail-h", tabindex: "-1" }, t("staff.dash.avail.heading")),
+    h("span", { class: "muted" }, t("staff.dash.avail.summary", { from: fmtDate(a.check_in), to: fmtDate(a.check_out), nights: t("staff.dash.avail.nights", { count: a.nights }) }))), form, body);
+}
+
+function dashSections(d, reload) {
+  const out = [alertBanner(d.alerts), "backup" in d ? backupLine(d.backup) : null];
+  const o = d.occupancy, cards = [];
+  if (d.arrivals) cards.push(statCard(t("staff.dash.arrivals"), d.arrivals.count, t("staff.dash.n_checked_in", { n: d.arrivals.checked_in })),
+    statCard(t("staff.dash.departures"), d.departures.count, t("staff.dash.n_checked_out", { n: d.departures.checked_out }) + (d.departures.overdue ? " · " + t("staff.dash.n_overdue", { n: d.departures.overdue }) : ""), d.departures.overdue > 0));
+  cards.push(statCard(t("staff.dash.occupancy"), o.percent + "%", t("staff.dash.rooms_of", { n: o.occupied, total: o.sellable })));
+  if ("cash_today" in d) cards.push(statCard(t("staff.dash.cash_today"), money0.format(d.cash_today), t("staff.dash.net_refunds")));
+  out.push(h("section", { "aria-labelledby": "today-h" }, h("h2", { id: "today-h" }, t("staff.dash.today.heading")), h("ul", { class: "dash-cards" }, cards)));
+  if (d.month) {
+    const m = d.month, hint = m.expenses_module ? null : t("staff.dash.month.no_expenses");
+    out.push(h("section", { "aria-labelledby": "month-h" }, h("h2", { id: "month-h" }, t("staff.dash.month.heading")), h("ul", { class: "dash-cards" },
+      statCard(t("staff.dash.month.net_revenue"), money0.format(m.net_revenue), t("staff.dash.month.net_revenue_hint")), statCard(t("staff.dash.month.expenses"), money0.format(m.expenses), hint),
+      statCard(t("staff.dash.month.profit"), money0.format(m.profit), hint), statCard(t("staff.dash.month.outstanding"), money0.format(m.outstanding), t("staff.dash.bookings", { count: m.outstanding_bookings }), m.outstanding > 0))));
+  }
+  const charts = [];
+  if (d.revenue_series) charts.push(h("section", { class: "card chart-card", "aria-labelledby": "rev-h" }, h("h2", { id: "rev-h" }, t("staff.dash.revenue.heading")),
+    d.revenue_series.some((p) => p.collected || p.refunded) ? revenueChart(d.revenue_series) : h("p", { class: "empty" }, t("staff.dash.revenue.none"))));
+  if (d.sources) charts.push(h("section", { class: "card chart-card", "aria-labelledby": "src-h" }, h("h2", { id: "src-h" }, t("staff.dash.sources.heading")), sourcesChart(d.sources.items)));
+  if (charts.length) out.push(h("div", { class: "chart-row" }, charts));
+  out.push(availSection(d, reload));
+  return out.filter(Boolean);
+}
+
 async function todayView(root) {
   const load = async () => {
-    const d = await api("/api/dashboard?" + qs({ property_id: S.prop }));
-    const card = (n, l, warn) => h("li", { class: warn && n ? "warn" : "" }, h("strong", null, n), h("span", null, l));
-    out.replaceChildren(...[alertBanner(d.alerts), "backup" in d ? backupLine(d.backup) : null,
-      h("ul", { class: "counts", "aria-label": "Today at a glance" }, card(d.arrivals.length, "Arrivals today"), card(d.overdue.length, "Late arrivals to resolve", true),
-        card(d.inhouse.length + d.due_out.length, "Guests in house"), card(d.due_out.length, "Due out", true), card(`${d.rooms.available || 0} of ${d.total_rooms}`, "Rooms available now")),
-      ...[d.overdue.length ? bookingTable(d.overdue, "Late arrivals (check-in date has passed)", "") : null,
-      bookingTable(d.arrivals, "Arrivals today", "No arrivals expected today."),
-      bookingTable(d.due_out, "Due out today or overdue", "No guests are due out."),
-      bookingTable(d.inhouse, "In house", "No guests are checked in.")].filter(Boolean)].filter(Boolean));
+    const d = await api("/api/staff/dashboard?" + qs({ property_id: S.prop, from: DASH.from, to: DASH.to }));
+    out.replaceChildren(...dashSections(d, load));
+    if (DASH.focus) { DASH.focus = false; $("#avail-h").focus(); }
   };
-  const out = h("div", { style: "display:grid;gap:1.5rem" }, loading());
-  root.replaceChildren(h("div", { class: "head" }, h("h1", null, "Today · " + fmtDate(S.meta.today)),
-    h("div", { class: "toolbar" }, propSelect(() => { out.replaceChildren(loading()); load().catch((e) => out.replaceChildren(fail(e, load))); }),
-      can("book") ? h("button", { class: "btn", type: "button", onclick: () => openBook() }, "New walk-in booking") : null)), out);
+  const out = h("div", { class: "dash" }, loading());
+  const again = () => { out.replaceChildren(loading()); load().catch((e) => out.replaceChildren(fail(e, load))); };
+  root.replaceChildren(h("div", { class: "head dash-head" }, h("h1", null, t("staff.dash.title_date", { date: fmtDate(S.meta.today) })),
+    h("div", { class: "toolbar" }, propSelect(again), can("book") ? h("button", { class: "btn", type: "button", onclick: () => openBook() }, t("staff.dash.new_walkin")) : null)), out);
   await load();
 }
 
-async function roomsView(root) {
-  S.date = S.date || S.meta.today;
-  const out = h("div", { style: "display:grid;gap:1.5rem" });
+// ---------- reservations ----------
+// The list is paged and sorted on the server (GET /api/bookings with page_size always sent). All texts come from web/locales/en.json.
+const PAGE_SIZE = 20;
+const RES_TABS = [["checked_in", "Checked-In"], ["checked_out", "Checked-Out"], ["all", ""], ["confirmed", "Confirmed"], ["cancelled", "Cancelled"]];  // the order the screen shows; "all" has no status filter
+const RES_SORTS = ["checkin_desc", "checkin_asc", "checkout_desc", "checkout_asc", "booked_desc"];  // the server holds the same whitelist
+const RES = { tab: "all", q: "", from: "", to: "", page: 1, seq: 0 };
+const tabText = (k) => ({ checked_in: t("staff.res.tab.checked_in"), checked_out: t("staff.res.tab.checked_out"), all: t("staff.res.tab.all"), confirmed: t("staff.res.tab.confirmed"), cancelled: t("staff.res.tab.cancelled") }[k]);
+const sortText = (k) => ({ checkin_desc: t("staff.res.sort.checkin_desc"), checkin_asc: t("staff.res.sort.checkin_asc"), checkout_desc: t("staff.res.sort.checkout_desc"), checkout_asc: t("staff.res.sort.checkout_asc"), booked_desc: t("staff.res.sort.booked_desc") }[k]);
+const resStatusText = (s) => ({ Confirmed: t("staff.res.status.confirmed"), "Checked-In": t("staff.res.status.checked_in"), "Checked-Out": t("staff.res.status.checked_out"), Cancelled: t("staff.res.status.cancelled"), "No-Show": t("staff.res.status.no_show") }[s] || s);
+const PAY_CLASS = { paid: "available", partial: "cleaning", due: "maintenance", refunded: "neutral", partially_refunded: "neutral" };
+const payText = (s) => ({ paid: t("staff.res.pay.paid"), partial: t("staff.res.pay.partial"), due: t("staff.res.pay.due"), refunded: t("staff.res.pay.refunded"), partially_refunded: t("staff.res.pay.partially_refunded") }[s] || t("staff.res.pay.due"));
+const resSort = (v) => {  // the sort is remembered for this browser session, so it survives tab changes and refreshes
+  try { if (v !== undefined) sessionStorage.setItem("res_sort", v); const s = sessionStorage.getItem("res_sort"); return RES_SORTS.includes(s) ? s : "checkin_desc"; } catch { return v || "checkin_desc"; }
+};
+const resQuery = () => ({ property_id: S.prop, q: RES.q.trim(), from: RES.from, to: RES.to, sort: resSort() });
+const resFiltered = () => !!(RES.q.trim() || RES.from || RES.to);
+const tabStatus = () => RES_TABS.find(([k]) => k === RES.tab)[1];
+
+function sortMenu(onpick) {
+  const label = () => t("staff.res.sort.label", { choice: sortText(resSort()) });
+  const btn = h("button", { class: "btn secondary sort-btn", type: "button", id: "sort-btn", "aria-haspopup": "true", "aria-expanded": "false" }, label());
+  const items = () => [...menu.querySelectorAll("button")];
+  const close = (back) => { menu.hidden = true; btn.setAttribute("aria-expanded", "false"); document.removeEventListener("pointerdown", outside, true); if (back) btn.focus(); };
+  const outside = (e) => { if (!wrap.contains(e.target)) close(false); };
+  const pick = (k) => { resSort(k); btn.textContent = label(); items().forEach((i) => i.setAttribute("aria-checked", String(i.dataset.k === k))); close(true); onpick(); };
+  const menu = h("ul", { class: "plain sort-menu", role: "menu", "aria-label": t("staff.res.sort.aria"), hidden: true },
+    RES_SORTS.map((k) => h("li", { role: "none" }, h("button", { type: "button", role: "menuitemradio", "data-k": k, "aria-checked": String(k === resSort()), onclick: () => pick(k) }, sortText(k)))));
+  menu.addEventListener("keydown", (e) => {
+    const all = items(), i = all.indexOf(document.activeElement);
+    if (e.key === "Escape") { e.preventDefault(); close(true); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); all[(i + 1) % all.length].focus(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); all[(i - 1 + all.length) % all.length].focus(); }
+    else if (e.key === "Tab") close(false);
+  });
+  btn.addEventListener("click", () => {
+    if (!menu.hidden) return close(true);
+    menu.hidden = false; btn.setAttribute("aria-expanded", "true"); document.addEventListener("pointerdown", outside, true);
+    (items().find((i) => i.getAttribute("aria-checked") === "true") || items()[0]).focus();
+  });
+  const wrap = h("div", { class: "sort-wrap" }, btn, menu);
+  return wrap;
+}
+
+async function reservationsView(root) {
+  if (S.q) { RES.q = S.q; S.q = ""; RES.tab = "all"; RES.page = 1; }  // the calendar jumps here with a booking ID to look up
+  let counts = null;
+  const tabsEl = h("div", { class: "res-tabs", role: "tablist", "aria-label": t("staff.res.tabs_aria") });
+  const listEl = h("div", { class: "res-list", id: "res-panel", role: "tabpanel" });
+  const pagerEl = h("nav", { class: "res-pager", "aria-label": t("staff.res.page.aria") });
+
+  const select = (k) => { RES.tab = k; RES.page = 1; drawTabs(); load(); };
+  const drawTabs = () => tabsEl.replaceChildren(RES_TABS.map(([k]) => h("button", {
+    type: "button", role: "tab", id: "res-tab-" + k, "aria-selected": String(RES.tab === k), "aria-controls": "res-panel", tabindex: RES.tab === k ? "0" : "-1",
+    class: "res-tab" + (RES.tab === k ? " on" : ""), onclick: () => select(k),
+    onkeydown: (e) => {
+      const i = RES_TABS.findIndex(([x]) => x === k), to = e.key === "ArrowRight" ? i + 1 : e.key === "ArrowLeft" ? i - 1 : e.key === "Home" ? 0 : e.key === "End" ? RES_TABS.length - 1 : null;
+      if (to == null) return;
+      e.preventDefault(); select(RES_TABS[(to + RES_TABS.length) % RES_TABS.length][0]); $("#res-tab-" + RES.tab).focus();
+    } }, h("span", null, tabText(k)), h("span", { class: "n" }, counts ? counts[k] : "–"))));
+
   const load = async () => {
-    out.replaceChildren(loading());
-    const rooms = await api("/api/rooms?" + qs({ property_id: S.prop, date: S.date })), by = {};
-    rooms.forEach((r) => (by[r.property] ||= []).push(r));
-    out.replaceChildren(h("ul", { class: "legend", "aria-label": "Status key" }, Object.entries(ROOM_LABEL).map(([k, l]) => h("li", null, badge(k, l)))),
-      ...Object.entries(by).map(([p, rs]) => h("section", { "aria-label": p }, h("h2", { style: "margin-bottom:.75rem" }, p),
-        h("ul", { class: "tiles" }, rs.map((r) => h("li", null, h("div", { class: "tile" },
-          h("h3", null, "Room " + r.number), h("div", { class: "small muted" }, `${r.type} · sleeps ${r.capacity} · floor ${r.floor}`), badge(r.status, ROOM_LABEL[r.status]),
-          r.note ? h("div", { class: "note" }, r.note) : null,
-          r.status === "available" && can("book") ? h("button", { class: "btn small secondary", type: "button", "aria-label": `Book room ${r.number}`, onclick: () => openBook(r) }, "Book") : null)))))));
+    const mine = ++RES.seq, status = tabStatus();
+    listEl.setAttribute("aria-busy", "true"); listEl.replaceChildren(loading());
+    try {
+      const d = await api("/api/bookings?" + qs({ ...resQuery(), status, page: RES.page, page_size: PAGE_SIZE }));
+      if (mine !== RES.seq) return;  // a newer request is already on its way
+      counts = d.counts;
+      if (!d.items.length && d.total > 0 && RES.page > 1) { RES.page = d.pages; return load(); }  // the last row of the last page was just acted on
+      drawTabs(); listEl.replaceChildren(resList(d)); drawPager(d);
+    } catch (e) { if (mine === RES.seq) { listEl.replaceChildren(fail(e, load)); pagerEl.replaceChildren(); } }
+    finally { if (mine === RES.seq) listEl.removeAttribute("aria-busy"); }
   };
-  root.replaceChildren(h("h1", null, "Rooms"), h("div", { class: "toolbar" }, propSelect(() => load().catch((e) => out.replaceChildren(fail(e, load)))),
-    h("div", null, h("label", { for: "f_date" }, "Date"), h("input", { id: "f_date", type: "date", value: S.date, onchange: (e) => { S.date = e.target.value || S.meta.today; load().catch((x) => out.replaceChildren(fail(x, load))); } }))), out);
+  const drawPager = (d) => {
+    if (!d.total) { pagerEl.replaceChildren(); return; }  // the empty state says it all
+    const from = (d.page - 1) * d.page_size + 1, to = Math.min(d.total, d.page * d.page_size), go = (n) => { RES.page = n; load(); window.scrollTo({ top: $("#res-tabs-top").offsetTop - 8 }); };
+    pagerEl.replaceChildren(h("span", { class: "muted" }, t("staff.res.page.showing", { from, to, total: d.total })),
+      d.pages > 1 ? h("div", { class: "pages" },
+        h("button", { class: "btn secondary", type: "button", disabled: d.page <= 1, onclick: () => go(d.page - 1) }, t("staff.res.page.prev")),
+        h("span", { class: "muted", "aria-current": "page" }, t("staff.res.page.of", { page: d.page, pages: d.pages })),
+        h("button", { class: "btn secondary", type: "button", disabled: d.page >= d.pages, onclick: () => go(d.page + 1) }, t("staff.res.page.next"))) : null);
+  };
+  const resetFilters = () => { RES.q = ""; RES.from = ""; RES.to = ""; RES.page = 1; route(); };
+  const resList = (d) => {
+    if (!d.items.length) {
+      const key = RES.tab === "all" ? (resFiltered() ? "all_filtered" : "all") : RES.tab, create = can("book") && (RES.tab === "all" || RES.tab === "confirmed") && !resFiltered();
+      const msg = { checked_in: t("staff.res.empty.checked_in"), checked_out: t("staff.res.empty.checked_out"), all: t("staff.res.empty.all"), all_filtered: t("staff.res.empty.all_filtered"), confirmed: t("staff.res.empty.confirmed"), cancelled: t("staff.res.empty.cancelled") }[key];
+      return h("div", { class: "empty card res-empty" }, h("p", null, msg), h("div", { class: "actions" },
+        create ? h("button", { class: "btn", type: "button", onclick: () => openBook() }, t("staff.res.new")) : null,
+        resFiltered() ? h("button", { class: "btn secondary", type: "button", onclick: resetFilters }, t("staff.res.clear")) : null));
+    }
+    const th = (k) => h("th", { scope: "col" }, t("staff.res.col." + k));
+    return h("div", { class: "scroll res-table" }, h("table", { class: "res" }, h("caption", { class: "sr-only" }, t("staff.res.title")),
+      h("thead", null, h("tr", null, ["id", "guest", "room", "checkin", "checkout", "nights", "guests", "amount", "payment", "status"].map(th))),
+      h("tbody", null, d.items.map((b) => h("tr", { class: "res-row", onclick: () => openDetail(b) },
+        h("td", { class: "c-id", "data-label": t("staff.res.col.id") }, h("button", { class: "rowlink", type: "button", "aria-label": t("staff.res.open_aria", { id: b.id, guest: b.guest_name }), onclick: (e) => { e.stopPropagation(); openDetail(b); } }, "#" + b.id)),
+        h("td", { class: "c-guest", "data-label": t("staff.res.col.guest") }, h("strong", null, b.guest_name), h("div", { class: "small muted" }, b.phone)),
+        h("td", { class: "c-room", "data-label": t("staff.res.col.room") }, b.room, h("div", { class: "small muted" }, b.room_type)),
+        h("td", { class: "c-in", "data-label": t("staff.res.col.checkin") }, fmtDate(b.check_in)),
+        h("td", { class: "c-out", "data-label": t("staff.res.col.checkout") }, fmtDate(b.check_out)),
+        h("td", { class: "c-n", "data-label": t("staff.res.col.nights") }, b.nights),
+        h("td", { class: "c-g", "data-label": t("staff.res.col.guests") }, b.guests),
+        h("td", { class: "c-amt", "data-label": t("staff.res.col.amount") }, money0.format(b.amount || 0)),
+        h("td", { class: "c-pay", "data-label": t("staff.res.col.payment") }, badge(PAY_CLASS[b.payment_status] || "maintenance", payText(b.payment_status))),
+        h("td", { class: "c-status", "data-label": t("staff.res.col.status") }, badge(STATUS_CLASS[b.status] || "neutral", resStatusText(b.status))))))));
+  };
+
+  const q = h("input", { id: "res_q", type: "search", value: RES.q, maxlength: 60, autocomplete: "off" }), from = h("input", { id: "res_from", type: "date", value: RES.from }), to = h("input", { id: "res_to", type: "date", value: RES.to });
+  const form = h("form", { class: "res-filters", role: "search", "aria-label": t("staff.res.find_aria") }, propSelect(() => { RES.page = 1; load(); }),
+    h("div", { class: "grow" }, h("label", { for: "res_q" }, t("staff.res.search")), q),
+    h("div", null, h("label", { for: "res_from" }, t("staff.res.from")), from), h("div", null, h("label", { for: "res_to" }, t("staff.res.to")), to),
+    h("button", { class: "btn", type: "submit" }, t("staff.res.search_btn")), resFiltered() ? h("button", { class: "btn secondary", type: "button", onclick: resetFilters }, t("staff.res.clear")) : null);
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (from.value && to.value && to.value < from.value) { toast(t("staff.res.bad_range")); return; }
+    RES.q = q.value; RES.from = from.value; RES.to = to.value; RES.page = 1; route();
+  });
+  const exportBtn = can("booking_export") ? h("button", { class: "btn secondary", type: "button", onclick: async (e) => {
+    const b = e.currentTarget; b.disabled = true;
+    try { await downloadBlob("/api/bookings/csv?" + qs({ ...resQuery(), status: tabStatus() }), "reservations.csv"); }
+    catch (x) { toast(x.message); } finally { b.disabled = false; }
+  } }, t("staff.res.export")) : null;
+
+  root.replaceChildren(h("div", { class: "res-head" }, h("div", null, h("h1", null, t("staff.res.title")), h("p", { class: "muted" }, t("staff.res.subtitle"))),
+    h("div", { class: "actions" }, exportBtn, can("book") ? h("button", { class: "btn", type: "button", onclick: () => openBook() }, t("staff.res.new")) : null)),
+    h("div", { id: "res-tabs-top" }, tabsEl), h("div", { class: "res-bar" }, form, sortMenu(() => { RES.page = 1; load(); })), listEl, pagerEl);
+  drawTabs();
   await load();
 }
 
-async function bookingsView(root) {
-  const out = h("div", null);
-  const load = async () => {
-    out.replaceChildren(loading());
-    const rows = await api("/api/bookings?" + qs({ property_id: S.prop, q: S.q, status: S.status, date: S.bdate }));
-    out.replaceChildren(...[rows.length >= 300 ? h("p", { class: "muted small" }, "Showing the latest 300 matches. Narrow your search to see others.") : null, bookingTable(rows, `Bookings (${rows.length})`, "No bookings match these filters.")].filter(Boolean));
-  };
-  const f = h("form", { class: "toolbar", role: "search", "aria-label": "Find bookings" }, propSelect(() => {}),
-    h("div", { class: "grow" }, h("label", { for: "f_q" }, "Guest, mobile, room or booking ID"), h("input", { id: "f_q", value: S.q, maxlength: 60 })),
-    h("div", null, h("label", { for: "f_st" }, "Status"), h("select", { id: "f_st" }, opt("", "Any status", S.status), Object.keys(STATUS_CLASS).map((s) => opt(s, s, S.status)))),
-    h("div", null, h("label", { for: "f_bd" }, "Staying on"), h("input", { id: "f_bd", type: "date", value: S.bdate || "" })),
-    h("button", { class: "btn", type: "submit" }, "Search"),
-    can("book") ? h("button", { class: "btn secondary", type: "button", onclick: () => openBook() }, "New walk-in booking") : null);
-  f.addEventListener("submit", (e) => { e.preventDefault(); S.q = $("#f_q").value; S.status = $("#f_st").value; S.bdate = $("#f_bd").value; load().catch((x) => out.replaceChildren(fail(x, load))); });
-  root.replaceChildren(h("h1", null, "Bookings"), f, out);
-  await load();
+// the booking detail: every fact on the row, and the actions the booking's status allows. The server re-checks each one.
+function openDetail(b) {
+  const today = S.meta.today, dlg = $("#ddlg"), row_ = (k, v) => (v || v === 0) ? h("div", { class: "kv" }, h("dt", null, k), h("dd", null, v)) : null;
+  const pay = payText(b.payment_status), src = sourceText(b.source === "front_desk" ? "walk_in" : b.source === "online" ? "website" : b.source);
+  const go = (fn) => () => { dlg.close(); fn(); };
+  const acts = [], btn = (label, cls, fn) => h("button", { class: "btn " + cls, type: "button", onclick: go(fn) }, label);
+  if (can("book") && b.status === "Confirmed") {
+    if (b.check_in <= today && today < b.check_out) acts.push(btn(t("staff.res.act.checkin"), "", () => resAct(b, "checkin", "staff.res.toast.checked_in")));
+    if (b.check_in <= today) acts.push(btn(t("staff.res.act.noshow"), "secondary", () => resAct(b, "noshow", "staff.res.toast.no_show")));
+    acts.push(btn(t("staff.res.act.edit"), "secondary", () => openEdit(b)), btn(t("staff.res.act.resched"), "secondary", () => openResched(b)), btn(t("staff.res.act.cancel"), "danger", () => openCancel(b)));
+  } else if (can("book") && b.status === "Checked-In") acts.push(btn(t("staff.res.act.checkout"), "", () => resAct(b, "checkout", "staff.res.toast.checked_out")), btn(t("staff.res.act.edit"), "secondary", () => openEdit(b)));
+  $("#d_title").textContent = t("staff.res.detail.title", { id: b.id });
+  $("#d_body").replaceChildren(h("p", null, badge(STATUS_CLASS[b.status] || "neutral", resStatusText(b.status)), " ", badge(PAY_CLASS[b.payment_status] || "maintenance", pay)),
+    h("dl", { class: "kvs" },
+      row_(t("staff.res.col.guest"), b.guest_name), row_(t("staff.res.detail.mobile"), b.phone), row_(t("staff.res.detail.room"), `${b.room} · ${b.room_type}`), row_(t("staff.res.detail.property"), b.property),
+      row_(t("staff.res.detail.stay"), `${fmtDate(b.check_in)} → ${fmtDate(b.check_out)} (${t("staff.res.nights", { count: b.nights })})`),
+      row_(t("staff.res.col.guests"), b.guests + (b.children ? ` · ${t("staff.res.children", { count: b.children })}` : "") + (b.extra_beds ? ` · ${t("staff.res.beds", { count: b.extra_beds })}` : "")),
+      row_(t("staff.res.col.amount"), money0.format(b.amount || 0) + (b.discount_amount ? ` · ${t("staff.res.detail.discount", { amount: money0.format(b.discount_amount) })}` : "")),
+      row_(t("staff.res.detail.source"), src), row_(t("staff.res.detail.booked_on"), b.created_at ? fmtDate(b.created_at.slice(0, 10)) : ""),
+      row_(t("staff.res.detail.arrival"), b.arrival_time ? t("staff.res.detail.arrives_about", { time: b.arrival_time }) : ""), row_(t("staff.res.detail.darshan"), b.darshan_date ? fmtDate(b.darshan_date) : ""),
+      row_(t("staff.res.detail.booked_by"), b.booker_name), row_(t("staff.res.detail.call_on_arrival"), [b.arrival_contact_name, b.arrival_contact_phone].filter(Boolean).join(" · ")),
+      row_(t("staff.res.detail.remarks"), b.remarks), row_(t("staff.res.detail.cancel_reason"), b.cancel_reason)),
+    h("div", { class: "foot" }, h("button", { class: "btn secondary", type: "button", onclick: () => dlg.close() }, t("staff.res.detail.close")), acts));
+  dlg.showModal();
+}
+async function resAct(b, action, doneKey) {
+  try { await api(`/api/bookings/${b.id}/${action}`, {}); toast(t(doneKey, { id: b.id })); route(); }
+  catch (e) { toast(e.message); }
 }
 
 // ---------- call-backs: status workflow, follow-up date, notes with time and name ----------
@@ -472,30 +693,440 @@ function viewIdPhoto(bid) {
   }, () => {});
 }
 
-// ---------- housekeeping board: to clean, cleaning, ready, blocked ----------
-const HK_COLS = [["blocked", "Blocked", "blocked"], ["to_clean", "To clean", "maintenance"], ["cleaning", "Being cleaned", "cleaning"], ["ready", "Ready", "available"], ["occupied", "Occupied", "occupied"]];
+// ---------- housekeeping team: housekeepers, room assignments, stats ----------
+// The server has no housekeeper records, so these live in this browser's localStorage (not shared between devices). The rooms and their clean/dirty state still come from the server.
+const HK_KEY = "mantralayam.housekeeping.v1", HK_SHIFTS = ["Morning", "Evening", "Night"], HK_STATUS = ["Available", "Busy", "On Leave"];
+const HK_CLASS = { Available: "available", Busy: "cleaning", "On Leave": "neutral" };
+const HK_UI = { sel: null, q: "", status: "" };  // the open person and the list filters survive a redraw
+let HK = null, hkSeq = 0;
+const pad2 = (n) => String(n).padStart(2, "0");
+const hkIso = (dt) => `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
+const hkToday = () => S.meta.today || hkIso(new Date());
+const hkShift = (iso, n) => { const x = new Date(iso + "T00:00:00"); x.setDate(x.getDate() + n); return hkIso(x); };
+const hkMonday = (iso) => hkShift(iso, -((new Date(iso + "T00:00:00").getDay() + 6) % 7));
+const hkInitials = (n) => n.trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+const hkStars = (n) => h("span", { class: "hk-stars", role: "img", "aria-label": n ? `Rating ${n} out of 5` : "Not rated yet" }, "★".repeat(n || 0) + "☆".repeat(5 - (n || 0)));
+function hkSave() { try { localStorage.setItem(HK_KEY, JSON.stringify(HK)); } catch { toast("This browser could not save the housekeeping data."); } }
+function hkLoad(rooms) {
+  if (HK) return HK;
+  try { const raw = JSON.parse(localStorage.getItem(HK_KEY) || "null"); if (raw && Array.isArray(raw.people)) HK = raw; } catch {}
+  if (!HK) { HK = hkSeed(rooms); hkSave(); }
+  HK.assign = HK.assign || {}; HK.log = (HK.log || []).filter((e) => e.d >= hkShift(hkToday(), -90));
+  return HK;
+}
+function hkSeed(rooms) {  // sample housekeepers with a month of history, so the tab is not empty on first use. Room numbers come from this property's real rooms.
+  const today = hkToday(), month = today.slice(0, 7), hour = new Date().getHours(), nums = rooms.length ? rooms.map((r) => r.number) : ["101"];
+  const team = [["Lakshmi Devi", "Morning", "Ground floor", "Available", 5, 22, "Very thorough with bathrooms."], ["Ramesh Kumar", "Morning", "Floor 1", "Busy", 4, 26, "Quick. Check the corners under the beds."],
+    ["Sunitha Reddy", "Evening", "Floor 2", "Available", 4, 24, "Reliable. Covered an extra shift last week."], ["Venkatesh Naidu", "Night", "Block B", "On Leave", 3, 31, "Needs a reminder to restock towels."],
+    ["Padmavathi", "Evening", "Ground floor", "Available", 5, 20, "Always reports damage or lost items."]];
+  const people = [], log = [];
+  team.forEach(([name, shift, zone, status, rating, mins, remark], i) => {
+    let seed = 7919 * (i + 3);
+    const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; }, att = {};
+    for (let back = 29; back >= 0; back--) {
+      const day = hkShift(today, -back), start = new Date(day + "T00:00:00").getTime(), present = rnd() < 0.92;
+      if (day.startsWith(month) && day < today) att[day] = present ? "present" : "absent";
+      if (!present || (status === "On Leave" && back < 3)) continue;
+      let n = 3 + Math.floor(rnd() * 6);
+      if (day === today) n = Math.min(n, Math.max(0, hour - 8));
+      for (let k = 0; k < n; k++) log.push({ h: "hk" + (i + 1), r: nums[(k * 7 + back * 3 + i) % nums.length], k: "c", d: day, t: start + (8 + k * 1.3) * 3600000, m: Math.max(8, Math.round(mins + (rnd() - 0.5) * 10)) });
+    }
+    people.push({ id: "hk" + (i + 1), name, phone: "900000000" + (i + 1), shift, zone, status, rating, att, remarks: [{ t: Date.now() - 86400000 * (i + 1), x: remark }], sample: true });
+  });
+  return { people, log, assign: {} };
+}
+function hkTidy(rooms) {  // a room that is dirty again after being cleaned starts a new job: forget the last cleaner
+  let changed = false;
+  for (const r of rooms) { const a = HK.assign[r.id]; if (a && a.cleanedAt && r.state === "to_clean") { Object.assign(a, { hk: null, cleanedAt: null, startedAt: null, inspected: false }); changed = true; } }
+  if (changed) hkSave();
+}
+function hkStats(p, rooms) {
+  const today = hkToday(), week = hkMonday(today), month = today.slice(0, 7), done = HK.log.filter((e) => e.h === p.id && e.k === "c");
+  const between = (from) => done.filter((e) => e.d >= from && e.d <= today).length, timed = done.filter((e) => e.m);
+  const marks = Object.entries(p.att).filter(([d]) => d.startsWith(month) && d <= today).map(([, v]) => v);
+  return { today: between(today), week: between(week), month: between(month + "-01"),
+    pending: rooms.filter((r) => HK.assign[r.id] && HK.assign[r.id].hk === p.id && (r.state === "to_clean" || r.state === "cleaning")).length,
+    avg: timed.length ? Math.round(timed.reduce((s, e) => s + e.m, 0) / timed.length) : null, present: marks.filter((v) => v === "present").length, absent: marks.filter((v) => v === "absent").length,
+    days: Array.from({ length: 7 }, (_, i) => { const d = hkShift(today, i - 6); return { d, n: done.filter((e) => e.d === d).length }; }) };
+}
+function hkPriority(r) {  // [badge colour, text, rank] for a room somebody still has to clean
+  if (!r.arrival || !["to_clean", "cleaning"].includes(r.state)) return null;
+  const m = /^(\d{1,2}):(\d{2})/.exec(r.arrival.time || ""), now = new Date();
+  if (!m) return ["blocked", "Urgent: guest arrives today", 0];
+  return +m[1] * 60 + +m[2] - (now.getHours() * 60 + now.getMinutes()) <= 120 ? ["blocked", "Urgent: next check-in within 2 hours", 0] : ["maintenance", "Check-in today at " + r.arrival.time, 1];
+}
+const hkRank = (a, b) => ((hkPriority(a) || [0, 0, 2])[2]) - ((hkPriority(b) || [0, 0, 2])[2]);
+function hkEvent(r, kind, rooms) {  // kind: s = cleaning started, c = cleaned, i = inspected. A room nobody is assigned to counts for nobody.
+  const a = HK.assign[r.id], p = a && HK.people.find((x) => x.id === a.hk);
+  if (!p) return;
+  const now = Date.now(), entry = { h: p.id, r: r.number, k: kind, d: hkToday(), t: now };
+  if (kind === "s") { Object.assign(a, { startedAt: now, cleanedAt: null, inspected: false }); if (p.status === "Available") p.status = "Busy"; }
+  if (kind === "c") {
+    const mins = a.startedAt ? Math.round((now - a.startedAt) / 60000) : 0;
+    if (mins >= 1 && mins <= 240) entry.m = mins;  // a start left open overnight says nothing about how long the room took
+    Object.assign(a, { cleanedAt: now, startedAt: null, inspected: false });
+    if (p.status === "Busy" && !rooms.some((x) => x.id !== r.id && x.state === "cleaning" && HK.assign[x.id] && HK.assign[x.id].hk === p.id)) p.status = "Available";
+  }
+  if (kind === "i") a.inspected = true;
+  HK.log.push(entry); hkSave();
+}
+function hkForm(title, fields, onSave, saveLabel = "Save") {  // a small dialog: fields are { name, label, value, options, area, type, max, required, hint }; onSave throws an Error to show a message
+  const id = "hkf" + ++hkSeq, err = h("p", { class: "msg error", role: "alert", hidden: true });
+  const els = fields.map((f, i) => {
+    const el = f.options ? h("select", { id: `${id}_${i}` }, f.options.map((o) => { const [v, l] = Array.isArray(o) ? o : [o, o]; return opt(v, l, f.value); }))
+      : f.area ? h("textarea", { id: `${id}_${i}`, maxlength: f.max }) : h("input", { id: `${id}_${i}`, type: f.type || "text", maxlength: f.max, max: f.maxDate, inputmode: f.mode, autocomplete: "off" });
+    if (!f.options) el.value = f.value == null ? "" : f.value;
+    return el;
+  });
+  const dlg = h("dialog", { "aria-labelledby": id + "h" }, h("form", { novalidate: true, method: "dialog" }, h("h2", { id: id + "h" }, title),
+    fields.map((f, i) => h("div", null, h("label", { for: `${id}_${i}`, class: f.required ? "req" : null }, f.label), els[i], f.hint ? h("p", { class: "hint" }, f.hint) : null)),
+    err, h("div", { class: "foot" }, h("button", { class: "btn secondary", type: "button", onclick: () => dlg.close() }, "Cancel"), h("button", { class: "btn", type: "submit" }, saveLabel))));
+  $("form", dlg).addEventListener("submit", (e) => {
+    e.preventDefault(); err.hidden = true;
+    try { onSave(Object.fromEntries(fields.map((f, i) => [f.name, els[i].value]))); dlg.close(); } catch (x) { err.textContent = x.message; err.hidden = false; }
+  });
+  dlg.addEventListener("close", () => dlg.remove()); document.body.append(dlg); dlg.showModal(); els[0].focus();
+}
+function hkSummary(d) {
+  const doneToday = HK.log.filter((e) => e.k === "c" && e.d === hkToday()).length, card = (k, v, sub) => h("li", null, h("span", { class: "k" }, k), h("strong", null, v), sub ? h("span", { class: "sub" }, sub) : null);
+  return h("ul", { class: "dash-cards", "aria-label": "Housekeeping summary" }, card("Housekeepers", HK.people.length, `${HK.people.filter((p) => p.status === "On Leave").length} on leave`),
+    card("Available now", HK.people.filter((p) => p.status === "Available").length), card("Rooms pending", (d.counts.to_clean || 0) + (d.counts.cleaning || 0), `${d.counts.to_clean || 0} waiting, ${d.counts.cleaning || 0} being cleaned`),
+    card("Rooms cleaned today", doneToday, "Counted when an assigned room is marked ready"));
+}
+function hkCsv(d) {
+  const esc = (v) => { let s = String(v == null ? "" : v); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };  // the quote stops a spreadsheet from running a typed formula
+  const rows = [["Housekeeping report", hkToday()], [], ["Name", "Phone", "Shift", "Area", "Status", "Cleaned today", "Cleaned this week", "Cleaned this month", "Pending rooms", "Average minutes per room", "Days present this month", "Days absent this month", "Rating", "Latest remark"]];
+  HK.people.forEach((p) => { const s = hkStats(p, d.rooms); rows.push([p.name, p.phone, p.shift, p.zone, p.status, s.today, s.week, s.month, s.pending, s.avg, s.present, s.absent, p.rating || "", p.remarks[0] ? p.remarks[0].x : ""]); });
+  rows.push([], ["Room", "Task", "Priority", "Assigned to", "Note"]);
+  d.rooms.filter((r) => ["to_clean", "cleaning"].includes(r.state) || (HK.assign[r.id] && HK.assign[r.id].hk)).sort(hkRank).forEach((r) => {
+    const a = HK.assign[r.id] || {}, who = HK.people.find((p) => p.id === a.hk), pr = hkPriority(r);
+    rows.push([r.number, r.state === "to_clean" ? "Dirty" : r.state === "cleaning" ? "Cleaning in progress" : a.inspected ? "Inspected" : "Cleaned", pr ? pr[1] : "", who ? who.name : "", a.note || ""]);
+  });
+  const url = URL.createObjectURL(new Blob(["﻿" + rows.map((r) => r.map(esc).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" })), a = h("a", { href: url, download: `housekeeping-${hkToday()}.csv` });
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); toast("Housekeeping report downloaded.");
+}
+function hkTeam(d, refresh) {
+  const rooms = d.rooms, listBox = h("ul", { class: "plain hk-people" }), statsBox = h("div", { class: "hk-stats", "aria-live": "polite" }), todayIso = hkToday();
+  const find = (id) => HK.people.find((p) => p.id === id), attLabel = (p) => ({ present: "Present", absent: "Absent" }[p.att[todayIso]] || "Not marked");
+  const matches = () => HK.people.filter((p) => (!HK_UI.status || p.status === HK_UI.status) && (!HK_UI.q || `${p.name} ${p.phone} ${p.zone}`.toLowerCase().includes(HK_UI.q.toLowerCase())));
+  const select = (id) => { HK_UI.sel = id; drawList(); drawStats(); };
+  const attendance = (p) => hkForm("Attendance: " + p.name, [{ name: "day", label: "Day", type: "date", value: todayIso, maxDate: todayIso, required: true },
+    { name: "state", label: "Attendance", options: [["present", "Present"], ["absent", "Absent"], ["", "Not marked"]], value: p.att[todayIso] || "present" }], (v) => {
+    if (!v.day || v.day > todayIso) throw new Error("Choose today or an earlier day.");
+    if (v.state) p.att[v.day] = v.state; else delete p.att[v.day];
+    hkSave(); toast(`Attendance saved for ${p.name}.`); refresh();
+  });
+  const edit = (p) => hkForm(p ? "Edit housekeeper" : "Add housekeeper", [{ name: "name", label: "Name", required: true, max: 60, value: p ? p.name : "" },
+    { name: "phone", label: "Phone number", required: true, type: "tel", mode: "tel", max: 15, value: p ? p.phone : "", hint: "10-digit mobile number." }, { name: "shift", label: "Shift", options: HK_SHIFTS, value: p ? p.shift : "Morning" },
+    { name: "zone", label: "Assigned floor or block", max: 30, value: p ? p.zone : "" }, { name: "status", label: "Status", options: HK_STATUS, value: p ? p.status : "Available" }], (v) => {
+    const name = v.name.trim().replace(/\s+/g, " "), digits = v.phone.replace(/[\s-]/g, ""), phone = digits.length > 10 ? digits.replace(/^(\+?91|0)/, "") : digits, others = HK.people.filter((x) => !p || x.id !== p.id);
+    if (!name) throw new Error("Enter the housekeeper's name.");
+    if (!/^\d{10}$/.test(phone)) throw new Error("Enter a 10-digit mobile number.");
+    if (others.some((x) => x.name.toLowerCase() === name.toLowerCase())) throw new Error(`${name} is already on the list.`);
+    if (others.some((x) => x.phone === phone)) throw new Error("Another housekeeper already has this phone number.");
+    const f = { name, phone, shift: v.shift, zone: v.zone.trim(), status: v.status };
+    if (p) { Object.assign(p, f); toast(`${name} updated.`); } else { const np = { id: "hk" + Date.now().toString(36), ...f, rating: 0, att: {}, remarks: [] }; HK.people.push(np); HK_UI.sel = np.id; toast(`${name} added.`); }
+    hkSave(); refresh();
+  }, p ? "Save changes" : "Add housekeeper");
+  const remove = (p) => {
+    if (!confirm(`Delete ${p.name}? Their attendance, remarks and cleaning history are removed, and their rooms become unassigned.`)) return;
+    HK.people = HK.people.filter((x) => x.id !== p.id); HK.log = HK.log.filter((e) => e.h !== p.id);
+    Object.values(HK.assign).forEach((a) => { if (a.hk === p.id) a.hk = null; });
+    if (HK_UI.sel === p.id) HK_UI.sel = null;
+    hkSave(); toast(`${p.name} deleted.`); refresh();
+  };
+  const remark = (p) => hkForm("Remark about " + p.name, [{ name: "x", label: "Remark", area: true, required: true, max: 300 }, { name: "rating", label: "Performance rating", options: [["", "Leave as it is"], ...[5, 4, 3, 2, 1].map((n) => [String(n), n + (n === 1 ? " star" : " stars")])] }], (v) => {
+    const x = v.x.trim(); if (!x) throw new Error("Write the remark first.");
+    p.remarks.unshift({ t: Date.now(), x }); p.remarks = p.remarks.slice(0, 20); if (v.rating) p.rating = +v.rating;
+    hkSave(); toast("Remark saved."); refresh();
+  }, "Save remark");
+  const row = (p) => h("li", { class: "hk-person" + (p.id === HK_UI.sel ? " on" : "") },
+    h("button", { class: "hk-pick", type: "button", "aria-pressed": p.id === HK_UI.sel ? "true" : "false", onclick: () => select(p.id) }, h("span", { class: "hk-avatar", "aria-hidden": "true" }, hkInitials(p.name)),
+      h("span", { class: "hk-who" }, h("strong", null, p.name), h("span", { class: "small muted" }, `${p.shift} · ${p.zone || "No area set"}`)), badge(HK_CLASS[p.status], p.status)),
+    h("div", { class: "hk-att" }, h("span", { class: "small muted" }, "Today: " + attLabel(p)), h("button", { class: "btn small secondary", type: "button", "aria-label": "Mark attendance for " + p.name, onclick: () => attendance(p) }, "Mark attendance")));
+  const drawList = () => { const rows = matches(); listBox.replaceChildren(rows.length ? rows.map(row) : h("li", { class: "empty small" }, HK.people.length ? "No housekeeper matches this search." : "No housekeepers yet. Add the first one.")); };
+  const drawStats = () => {
+    const p = find(HK_UI.sel);
+    if (!p) { statsBox.replaceChildren(h("p", { class: "empty card" }, "Select a housekeeper to view their stats.")); return; }
+    const s = hkStats(p, rooms), max = Math.max(1, ...s.days.map((x) => x.n)), dayName = new Intl.DateTimeFormat("en-IN", { weekday: "short" });
+    const card = (k, v, sub) => h("li", null, h("span", { class: "k" }, k), h("strong", null, v), sub ? h("span", { class: "sub" }, sub) : null);
+    const acts = HK.log.filter((e) => e.h === p.id).sort((a, b) => b.t - a.t).slice(0, 8), what = { c: ["Cleaning", "Completed"], s: ["Cleaning", "In progress"], i: ["Inspection", "Inspected"] };
+    statsBox.replaceChildren(
+      h("section", { class: "card", "aria-label": "Housekeeper" }, h("div", { class: "hk-ph" }, h("div", { class: "hk-id" },h("span", { class: "hk-avatar", "aria-hidden": "true" }, hkInitials(p.name)),
+        h("div", null, h("h2", null, p.name), h("div", { class: "small muted" }, `${p.shift} shift · ${p.zone || "No area set"} · ${p.phone}`)), badge(HK_CLASS[p.status], p.status)),
+        h("div", { class: "toolbar" }, h("button", { class: "btn small secondary", type: "button", onclick: () => edit(p) }, "Edit"), h("button", { class: "btn small danger", type: "button", onclick: () => remove(p) }, "Delete")))),
+      h("ul", { class: "dash-cards", "aria-label": "Statistics for " + p.name }, card("Rooms cleaned today", s.today), card("This week", s.week, "Since Monday"), card("This month", s.month), card("Pending rooms", s.pending, "Assigned, not yet ready"),
+        card("Average time per room", s.avg == null ? "–" : s.avg + " min"), card("Attendance this month", `${s.present} / ${s.absent}`, "days present / absent"), card("Performance", hkStars(p.rating))),
+      h("section", { class: "card hk-chart-card", "aria-label": "Rooms cleaned in the last 7 days" }, h("h2", null, "Rooms cleaned, last 7 days"),
+        h("ul", { class: "hk-chart" }, s.days.map((x) => h("li", { "aria-label": `${dayName.format(new Date(x.d + "T00:00:00"))}: ${x.n} rooms` }, h("span", null, x.n), h("div", { class: "col", "aria-hidden": "true" }, h("i", { style: `height:${Math.round((x.n / max) * 100)}%` })), h("span", null, dayName.format(new Date(x.d + "T00:00:00"))))))),
+      h("section", { class: "card", "aria-label": "Remarks" }, h("div", { class: "head" }, h("h2", null, "Staff remarks"), h("button", { class: "btn small secondary", type: "button", onclick: () => remark(p) }, "Add remark")),
+        p.remarks.length ? h("ul", { class: "plain notes" }, p.remarks.slice(0, 5).map((n) => h("li", null, h("span", { class: "small muted" }, fmtWhen(n.t) + " · "), n.x))) : h("p", { class: "muted small" }, "No remarks yet.")),
+      acts.length ? h("div", { class: "scroll", role: "region", "aria-label": "Recent activity", tabindex: "0" }, h("table", null, h("caption", null, "Recent activity"), h("thead", null, h("tr", null, ["Room", "Task", "Time", "Status"].map((x) => h("th", { scope: "col" }, x)))),
+        h("tbody", null, acts.map((e) => h("tr", null, h("td", null, e.r), h("td", null, what[e.k][0]), h("td", null, fmtWhen(e.t)), h("td", null, badge(e.k === "s" ? "cleaning" : "available", what[e.k][1]))))))) : h("p", { class: "empty card" }, "No activity yet."));
+  };
+  const search = h("input", { id: "hk_q", type: "search", value: HK_UI.q, placeholder: "Name, phone or area", autocomplete: "off", oninput: (e) => { HK_UI.q = e.target.value; drawList(); } });
+  const filter = h("select", { id: "hk_st", onchange: (e) => { HK_UI.status = e.target.value; drawList(); } }, opt("", "All statuses", HK_UI.status), HK_STATUS.map((x) => opt(x, x, HK_UI.status)));
+  if (!find(HK_UI.sel)) HK_UI.sel = null;
+  drawList(); drawStats();
+  return h("section", { "aria-label": "Housekeepers" }, h("div", { class: "head" }, h("h2", null, "Housekeepers"), h("div", { class: "toolbar" }, can("clean") ? h("button", { class: "btn", type: "button", onclick: () => edit(null) }, "Add housekeeper") : null,
+    h("button", { class: "btn secondary", type: "button", onclick: () => hkCsv(d) }, "Export report (CSV)"))),
+    HK.people.some((p) => p.sample) ? h("p", { class: "hint" }, "The first five housekeepers and their history are sample data to show how this tab works. Edit or delete them any time. Housekeeper records are kept in this browser only.") : null,
+    h("div", { class: "hk-team" }, h("div", { class: "hk-listpane" }, h("div", { class: "toolbar" }, h("div", { class: "grow" }, h("label", { for: "hk_q" }, "Search"), search), h("div", null, h("label", { for: "hk_st" }, "Status"), filter)), listBox), statsBox));
+}
+
+// ---------- housekeeping: the team panel. Rooms are assigned, cleaned and marked ready on the Rooms page ----------
+const hkFloor = (r) => (r.floor === 0 || r.floor === "0" ? "Ground floor" : r.floor == null || r.floor === "" ? "Rooms" : "Floor " + r.floor);
 async function housekeepingView(root) {
-  const out = h("div", null);
+  const out = h("div", { class: "dash" });
   const reload = () => load().catch((x) => out.replaceChildren(fail(x, reload)));
-  const post = async (path, ok, body) => { try { await api(path, body || {}); toast(ok); reload(); } catch (x) { toast(x.message); } };
   const load = async () => {
     const d = await api("/api/housekeeping?" + qs({ property_id: S.prop }));
-    const btn = (label, fn, cls = "secondary") => h("button", { class: "btn small " + cls, type: "button", onclick: fn }, label);
-    const card = (r) => h("li", { class: "hk-card" + (r.flag ? " warn" : "") }, h("div", { class: "head" }, h("strong", null, "Room " + r.number), h("span", { class: "small muted" }, r.type + (S.meta.properties.length > 1 ? ", " + r.property : ""))),
-      r.guest ? h("div", { class: "small" }, "Guest: " + r.guest) : null, r.reason ? h("div", { class: "small muted" }, (KIND_LABEL[r.kind] || "") + ": " + r.reason + (r.until ? ", until " + fmtDate(r.until) : "")) : null,
-      r.ready_since ? h("div", { class: "small muted" }, "Ready since " + fmtWhen(r.ready_since)) : null,
-      r.arrival ? h("div", { class: "small" + (r.flag ? " bad" : "") }, (r.flag ? "Not ready: " : "") + `${r.arrival.guest} arrives today` + (r.arrival.time ? " at " + r.arrival.time : "")) : null,
-      h("div", { class: "actions" }, can("clean") ? [
-        r.state === "to_clean" ? btn("Start cleaning", () => post(`/api/room_events/${r.event_id}/start_cleaning`, `Room ${r.number}: cleaning started.`)) : null,
-        r.state === "to_clean" || r.state === "cleaning" ? btn("Mark ready", () => post(`/api/room_events/${r.event_id}/release`, `Room ${r.number}: ready for guests.`), "") : null,
-        r.state === "ready" || r.state === "occupied" ? btn("Needs cleaning", () => post(`/api/rooms/${r.id}/needs_cleaning`, `Room ${r.number}: marked for cleaning.`)) : null] : null,
-        r.state === "blocked" && can("status") ? btn("Clear block", () => post(`/api/room_events/${r.event_id}/release`, `Room ${r.number}: available again.`)) : null));
-    out.replaceChildren(h("ul", { class: "counts", "aria-label": "Rooms by state" }, HK_COLS.map(([k, l]) => h("li", { class: k === "to_clean" && d.counts[k] ? "warn" : "" }, h("strong", null, d.counts[k] || 0), h("span", null, l)))),
-      h("div", { class: "hk-cols" }, HK_COLS.map(([k, l, cls]) => h("section", { "aria-label": l }, h("h2", null, badge(cls, l)), h("ul", { class: "plain hk-list" }, d.rooms.filter((r) => r.state === k).map(card)), d.rooms.some((r) => r.state === k) ? null : h("p", { class: "empty small" }, "None")))));
+    hkLoad(d.rooms); hkTidy(d.rooms);
+    out.replaceChildren(hkSummary(d), hkTeam(d, reload));
   };
   root.replaceChildren(h("div", { class: "head" }, h("h1", null, "Housekeeping"), h("div", { class: "toolbar" }, propSelect(reload), h("button", { class: "btn secondary", type: "button", onclick: reload }, "Refresh"),
-    can("status") ? h("button", { class: "btn", type: "button", onclick: openStatus }, "Block a room or report an issue") : null)), out);
+    h("a", { class: "btn", href: "#/rooms", onclick: () => { RM.tab = "to_clean"; } }, "Open rooms to assign"))),
+    h("p", { class: "hint" }, "Rooms are assigned, cleaned and marked ready on the Rooms page. The counts and each housekeeper's stats here follow what is done there."), out);
   await load();
+}
+
+// ---------- rooms: every room with ONE state for the day, and every action for it (GET /api/rooms/board) ----------
+const RM_STATES = [["available", "Available", "available"], ["booked", "Booked", "booked"], ["checked_in", "Checked in", "occupied"], ["to_clean", "To clean", "maintenance"], ["cleaning", "Being cleaned", "cleaning"], ["blocked", "Blocked", "blocked"]];  // state, word, badge colour
+const RM_HELP = { available: "Free and ready for a guest.", booked: "Reserved. The guest has not checked in yet.", checked_in: "A guest is staying in this room.", to_clean: "Waiting for a housekeeper. It cannot be booked for today until it is marked ready.",
+  cleaning: "A housekeeper is cleaning it now.", blocked: "Not available to guests until this status is cleared." };
+const RM_ACT = { "room.block": "Blocked", "room.block_edit": "Status edited", "room.release": "Status cleared", "room.cleaning_required": "Marked for cleaning", "room.cleaning_start": "Cleaning started", "room.cleaning_done": "Marked ready" };
+const MOVED = { status: "rooms" };  // pages merged into another one: old links and bookmarks still open the right page
+// kept across redraws, refreshes and visits: the open count card, filters, folded groups, the open room, both scroll positions, rooms picked for a bulk action, the change waiting to be sent
+const RM = { tab: "attention", q: "", who: "", floor: "", view: "", open: {}, sel: null, top: 0, y: 0, live: false, pick: null, job: null, draw: null, keys: null, tick: 0, sig: "" };
+
+// Clear status, Mark ready and Needs cleaning reach the server about five seconds later, so Undo simply drops them: nothing to reverse, no audit entry, no waiting-list message to take back.
+function rmSend(keep) {  // keep: the page is closing, so the requests must outlive it
+  const job = RM.job;
+  if (!job) return;
+  clearTimeout(job.timer); RM.job = null; job.bar.remove();
+  if (keep) { job.items.forEach((it) => { api(it.path, {}, true).catch(() => {}); if (it.after) it.after(); }); return; }
+  (async () => {
+    let bad = "";
+    for (const it of job.items) { try { await api(it.path, {}); if (it.after) it.after(); } catch (x) { bad = x.message; } }  // one at a time: each is its own write transaction
+    if (bad) toast(bad);
+    if (RM.draw) RM.draw(true);
+  })();
+}
+function rmLater(msg, items, patch) {  // patch: room id -> what the room shows until the server has answered
+  rmSend();  // one change waits at a time: an earlier one is sent now
+  const bar = h("div", { class: "t rm-undo" }, h("span", null, msg), h("button", { class: "btn small secondary", type: "button", onclick: () => {
+    clearTimeout(job.timer); RM.job = null; toast("Undone. Nothing was changed."); if (RM.draw) RM.draw(); } }, "Undo"));
+  const job = RM.job = { items, patch, bar, timer: setTimeout(rmSend, 5000) };
+  clearTimeout(toast.id); $("#toast").replaceChildren(bar);
+  if (RM.draw) RM.draw();
+}
+window.addEventListener("pagehide", () => rmSend(true));
+window.addEventListener("scroll", () => { if (RM.live) RM.y = window.scrollY; }, { passive: true });
+document.addEventListener("keydown", (e) => { if (RM.keys) RM.keys(e); });
+
+async function roomsView(root) {
+  S.date = S.date || S.meta.today;
+  clearInterval(RM.tick);
+  if (!RM.view) { try { RM.view = sessionStorage.getItem("rooms_view") === "list" ? "list" : "tiles"; } catch { RM.view = "tiles"; } }
+  const out = h("div", { class: "dash rm-page" }, loading()), live = h("p", { class: "sr-only", role: "status", "aria-live": "polite" });
+  const tabsBox = h("ul", { class: "hk-tabs", "aria-label": "Rooms by state. Choose one to filter" }), bulkBox = h("div", { class: "rm-bulk", role: "group", "aria-label": "Actions for the selected rooms", hidden: true });
+  const gridBox = h("div", { class: "hk-board", tabindex: "0", role: "region", "aria-label": "Rooms" }), drawer = h("dialog", { class: "hk-drawer", "aria-labelledby": "hk_dh" });
+  let d = null, hist = {}, shownN = 0;
+  gridBox.addEventListener("scroll", () => { RM.top = gridBox.scrollTop; });
+  const say = (x) => { live.textContent = x; };
+  const today = () => d.date === d.today;
+  const rooms = () => (RM.job ? d.rooms.map((r) => (RM.job.patch[r.id] ? { ...r, ...RM.job.patch[r.id], wait: true } : r)) : d.rooms);  // a change waiting to be sent already shows
+  const asg = (r) => (HK && HK.assign[r.id]) || {};  // housekeeper records exist for the cleaning roles only
+  const person = (id) => (HK && id ? HK.people.find((p) => p.id === id) : null);
+  const word = (r) => (r.state === "blocked" ? KIND_LABEL[r.kind] || "Blocked" : RM_STATES.find((s) => s[0] === r.state)[1]);
+  const tone = (r) => RM_STATES.find((s) => s[0] === r.state)[2];
+  const urgent = (r) => (hkPriority(r) || [0, 0, 2])[2] === 0;
+  const attention = (r) => r.state === "to_clean" || r.state === "blocked" || urgent(r);
+  const line = (r) => { const who = person(asg(r).hk);
+    return r.state === "blocked" ? r.reason : r.state === "booked" || r.state === "checked_in" ? r.guest : r.state === "available" ? r.type : who ? who.name : can("clean") ? "Unassigned" : ""; };
+  const keepFocus = (fn) => {  // a redraw replaces the buttons: put the focus back on the same one
+    const a = document.activeElement, fk = a && a.dataset ? a.dataset.fk : null;
+    fn();
+    if (fk && document.activeElement !== a) { const el = root.querySelector(`[data-fk="${fk}"]`); if (el) el.focus({ preventScroll: true }); }
+  };
+  const reload = () => out.isConnected && load().catch((x) => toast(x.message));
+  const load = async (auto) => {
+    const data = await api("/api/rooms/board?" + qs({ property_id: S.prop, date: S.date })), sig = JSON.stringify(data);
+    if (!out.isConnected || (auto && sig === RM.sig)) return;  // the 60-second refresh redraws only when something changed
+    RM.sig = sig; d = data; hist = {};
+    if (can("clean")) { hkLoad(d.rooms); hkTidy(d.rooms); }
+    if (!tabsBox.isConnected) out.replaceChildren(tabsBox, bulkBox, gridBox);
+    fillSelects(); draw();
+  };
+
+  // ---- actions ----
+  const act = async (path, ok, after) => { try { await api(path, {}); if (after) after(); toast(ok); } catch (x) { toast(x.message); } reload(); };
+  const startRoom = (r) => act(`/api/room_events/${r.event_id}/start_cleaning`, `Room ${r.number}: cleaning started.`, () => hkEvent(r, "s", d.rooms));
+  const count = (rs, one, many) => (rs.length === 1 ? `Room ${rs[0].number}: ${one}` : `${rs.length} rooms ${many}`);
+  const readyRooms = (rs) => rmLater(count(rs, "ready for guests.", "marked ready."), rs.map((r) => ({ path: `/api/room_events/${r.event_id}/release`, after: () => hkEvent(r, "c", d.rooms) })),  // after: the housekeeper's stats, once the server accepted it
+    Object.fromEntries(rs.map((r) => [r.id, { state: r.under || "available", under: null }])));
+  const dirtyRooms = (rs) => rmLater(count(rs, "marked for cleaning.", "marked for cleaning."), rs.map((r) => ({ path: `/api/rooms/${r.id}/needs_cleaning` })), Object.fromEntries(rs.map((r) => [r.id, { state: "to_clean", under: r.state }])));
+  const clearRoom = (r) => rmLater(`Room ${r.number}: status cleared.`, [{ path: `/api/room_events/${r.event_id}/release` }], { [r.id]: { state: r.under || "available", under: null } });
+  const assignTo = (rs, id) => { const p = person(id); rs.forEach((r) => { HK.assign[r.id] = { ...asg(r), hk: p ? p.id : null }; }); hkSave();
+    toast(rs.length > 1 ? `${rs.length} rooms ${p ? "assigned to " + p.name : "unassigned"}.` : p ? `Room ${rs[0].number} assigned to ${p.name}.` : `Room ${rs[0].number} is unassigned.`); draw(); };
+  const hkOptions = (cur) => [["", "Unassigned"], ...HK.people.filter((p) => p.status !== "On Leave" || p.id === cur).map((p) => [p.id, `${p.name} (${p.shift})`])];
+  const assignDialog = (rs) => hkForm(rs.length > 1 ? `Assign ${rs.length} rooms` : "Assign room " + rs[0].number, [{ name: "hk", label: "Housekeeper", options: hkOptions(rs.length === 1 ? asg(rs[0]).hk : ""), value: rs.length === 1 ? asg(rs[0]).hk || "" : "" }], (v) => assignTo(rs, v.hk), "Assign");
+  const noteDialog = (r) => hkForm("Note for room " + r.number, [{ name: "note", label: "Note", area: true, max: 200, value: asg(r).note || "" }], (v) => { HK.assign[r.id] = { ...asg(r), note: v.note.trim() }; hkSave(); toast("Note saved."); draw(); });
+  const blockRoom = async (r) => { openStatus(); $("#k_prop").value = r.property_id; await fillRooms($("#k_prop"), $("#k_room"), S.meta.today, r.id); $("#k_room").value = r.id; };
+  const editBlock = (r) => editDialog(`Edit the status of room ${r.number}`, [{ name: "kind", label: "Status", type: "select", options: S.meta.kinds.map((k) => [k, KIND_LABEL[k]]) },
+    { name: "issue_category", label: "Issue category (not used for a plain block)", type: "select", options: S.meta.issues.map((k) => [k, k]) },
+    { name: "end_date", label: "Available again on (may stay empty for out of service)", type: "date", min: addDay(r.since, 1) }, { name: "reason", label: "Reason", req: true, max: 300 }],
+    { kind: r.kind, issue_category: r.category || S.meta.issues[0], end_date: r.until || "", reason: r.reason || "" },
+    (b) => api(`/api/room_events/${r.event_id}/edit`, { ...b, issue_category: b.kind === "internal_block" ? "" : b.issue_category }), reload);
+  const openBooking = (r) => { S.q = String(r.booking_id); location.hash = "#/bookings"; };
+  const quick = (r) => {  // the one most common action for a room, shown on its tile
+    if (r.wait) return null;
+    if (r.state === "available") return can("book") && d.date >= d.today ? ["Book", () => openBook(r)] : null;
+    if (!can("clean") || !today()) return null;
+    if (r.state === "to_clean") return asg(r).hk ? ["Start", () => startRoom(r)] : ["Assign", () => assignDialog([r])];
+    return r.state === "cleaning" ? ["Ready", () => readyRooms([r])] : null;
+  };
+
+  // ---- filters, count cards, tiles and list ----
+  const shown = () => { const needle = RM.q.trim().toLowerCase();
+    return rooms().filter((r) => (!needle || String(r.number).toLowerCase().includes(needle) || (r.guest || "").toLowerCase().includes(needle) || (r.arrival ? r.arrival.guest : "").toLowerCase().includes(needle))
+      && (!RM.who || (RM.who === "none" ? !asg(r).hk : asg(r).hk === RM.who)) && (RM.floor === "" || String(r.floor) === RM.floor)); };
+  const tabKeys = () => (today() ? ["attention", "all", ...RM_STATES.map((s) => s[0])] : ["all", "available", "booked", "checked_in", "blocked"]);  // cleaning describes now, so another day has no cleaning cards
+  const tab = () => (tabKeys().includes(RM.tab) ? RM.tab : "all");
+  const tabName = (k) => (k === "attention" ? "Needs attention" : k === "all" ? "All" : RM_STATES.find((s) => s[0] === k)[1]);
+  const inTab = (r, k) => k === "all" || (k === "attention" ? attention(r) : r.state === k);
+  const togglePick = (r) => { if (RM.pick.has(r.id)) RM.pick.delete(r.id); else RM.pick.add(r.id); draw(); say(`Room ${r.number} ${RM.pick.has(r.id) ? "selected" : "not selected"}. ${RM.pick.size} selected.`); };
+  const tile = (r) => {
+    const pr = hkPriority(r), q = quick(r), urg = urgent(r), ln = line(r), picking = !!RM.pick, on = picking && RM.pick.has(r.id);
+    return h("li", { class: `hk-tile hk-s-${r.state}` + (urg ? " urgent" : "") + (on ? " picked" : "") + (r.id === RM.sel ? " sel" : "") },
+      h("button", { class: "hk-open", type: "button", "data-fk": "o" + r.id, "aria-pressed": picking ? String(on) : null, "aria-label": `Room ${r.number}, ${word(r)}${ln ? ", " + ln : ""}${pr ? ", " + pr[1] : ""}. ${picking ? "Select" : "Open details"}`,
+        onclick: () => (RM.pick ? togglePick(r) : openDrawer(r.id)) },
+        h("span", { class: "num" }, h("i", { class: "hk-dot", "aria-hidden": "true" }), r.number, urg ? h("span", { class: "hk-urg", "aria-hidden": "true", title: pr[1] }, "!") : null),
+        h("span", { class: "st" }, word(r)), h("span", { class: "line" }, ln || "–")),
+      q && !picking ? h("button", { class: "hk-quick", type: "button", "data-fk": "q" + r.id, "aria-label": `${q[0]} room ${r.number}`, onclick: q[1] }, q[0]) : null);
+  };
+  const groups = (list) => {  // urgent rooms first as their own group, then one group per building and floor; the room type shows once when the whole group shares it
+    const m = new Map(), urg = list.filter(urgent), gs = [];
+    if (urg.length) gs.push({ key: "urgent", title: "Urgent · guest arriving soon", rooms: urg });
+    list.filter((r) => !urg.includes(r)).forEach((r) => { const k = r.property_id + "|" + r.floor; if (!m.has(k)) m.set(k, []); m.get(k).push(r); });
+    m.forEach((rs, k) => gs.push({ key: k, title: `${rs[0].property} · ${hkFloor(rs[0])}` + (new Set(rs.map((x) => x.type)).size === 1 ? " · " + rs[0].type : ""), rooms: rs }));
+    return gs;
+  };
+  const fold = (g, defOpen) => h("details", { class: "hk-group" + (g.key === "urgent" ? " urgent" : ""), open: g.key in RM.open ? RM.open[g.key] : defOpen, ontoggle: (e) => { RM.open[g.key] = e.target.open; } },
+    h("summary", null, h("span", { class: "hk-gt" }, g.key === "urgent" ? h("span", { class: "bad", "aria-hidden": "true" }, "! ") : null, g.title), h("span", { class: "small muted" }, g.rooms.length === 1 ? "1 room" : g.rooms.length + " rooms")),
+    h("ul", { class: "plain hk-tiles" }, g.rooms.map(tile)));
+  const table = (list) => h("div", { class: "scroll", role: "region", "aria-label": "Rooms as a list", tabindex: "0" }, h("table", null, h("caption", null, `${tabName(tab())} (${list.length})`),
+    h("thead", null, h("tr", null, ["Room", "Status", "Category", "Reason", "Since", "Until", "Actions"].map((x) => h("th", { scope: "col" }, x)))),
+    h("tbody", null, list.map((r) => { const q = quick(r), ev = ["blocked", "to_clean", "cleaning"].includes(r.state);  // a status entry has a reason and dates; a booking has a guest and a stay
+      return h("tr", null, h("td", null, h("strong", null, r.number), h("div", { class: "small muted" }, `${r.property} · ${hkFloor(r)}`)), h("td", null, badge(tone(r), word(r)), urgent(r) ? h("div", { class: "small bad" }, "Urgent") : null),
+        h("td", null, r.category || ""), h("td", null, ev ? r.reason || "" : r.guest ? "Guest: " + r.guest : ""), h("td", null, fmtDate(ev ? r.since : r.check_in)), h("td", null, ev ? (r.until ? fmtDate(r.until) : "Until cleared") : fmtDate(r.check_out)),
+        h("td", { class: "actions" }, q ? h("button", { class: "btn small", type: "button", "data-fk": "q" + r.id, "aria-label": `${q[0]} room ${r.number}`, onclick: q[1] }, q[0]) : null,
+          h("button", { class: "btn small secondary", type: "button", "data-fk": "o" + r.id, "aria-label": "Details of room " + r.number, onclick: () => openDrawer(r.id) }, "Details"))); }))));
+  const drawBulk = () => {
+    bulkBox.hidden = !RM.pick;
+    if (!RM.pick) return;
+    const rs = rooms().filter((r) => RM.pick.has(r.id) && !r.wait), n = rs.length;
+    const run = (states, fn) => { const ok = rs.filter((r) => states.includes(r.state));
+      if (!ok.length) { toast("None of the selected rooms is in a state for this action."); return; }
+      RM.pick = null; fn(ok); draw();
+      if (ok.length < n) say(`${n - ok.length} of the selected rooms were left out: they are not in a state for this action.`); };
+    const b = (label, fn) => h("button", { class: "btn small secondary", type: "button", "data-fk": "b" + label, disabled: !n, onclick: fn }, label);
+    bulkBox.replaceChildren(h("strong", null, n ? `${n} selected` : "Select rooms below"), b("Assign to…", () => run(["to_clean", "cleaning"], assignDialog)), b("Mark needs cleaning", () => run(["available", "booked", "checked_in"], dirtyRooms)),
+      b("Mark ready", () => run(["to_clean", "cleaning"], readyRooms)), h("button", { class: "btn small secondary", type: "button", "data-fk": "bdone", onclick: () => { RM.pick = null; draw(); } }, "Cancel"));
+  };
+  const drawNow = () => {
+    if (!today()) RM.pick = null;
+    const rs = shown(), cur = tab(), list = rs.filter((r) => inTab(r, cur));
+    shownN = list.length;
+    tabsBox.replaceChildren(tabKeys().map((k) => { const n = rs.filter((r) => inTab(r, k)).length;
+      return h("li", null, h("button", { class: "hk-tab" + (k === cur ? " on" : "") + (k === "attention" && n ? " warn" : ""), type: "button", "data-fk": "t" + k, "aria-pressed": String(k === cur), onclick: () => { RM.tab = k; filtered(); } },
+        h("strong", null, n), h("span", null, tabName(k)))); }));
+    if (pickBtn) { pickBtn.style.display = today() ? "" : "none"; pickBtn.setAttribute("aria-pressed", String(!!RM.pick)); }
+    viewBtns.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === RM.view)));
+    drawBulk();
+    if (!list.length) gridBox.replaceChildren(h("p", { class: "empty" }, !d.rooms.length ? "This property has no rooms yet." : cur === "attention" && !RM.q.trim() && !RM.who && RM.floor === "" ? "No rooms need attention today." : "No rooms match. Choose another count above or clear the search."));
+    else if (RM.view === "list" && !RM.pick) gridBox.replaceChildren(table(list));  // rooms are picked for a bulk action on the tiles
+    else { const gs = groups(list), first = gs.findIndex((g) => g.key !== "urgent");  // a long list starts with only the urgent group and the first floor open
+      gridBox.replaceChildren(gs.map((g, i) => fold(g, list.length <= 40 || g.key === "urgent" || i === first))); }
+    gridBox.scrollTop = RM.top;
+    fillDrawer();
+  };
+  const draw = (fresh) => { if (!out.isConnected) return; if (fresh === true) reload(); else if (d) keepFocus(drawNow); };  // fresh: a waiting change was sent, read the result
+  const filtered = () => { RM.top = 0; draw(); say(shownN === 1 ? "1 room shown." : `${shownN} rooms shown.`); };
+
+  // ---- the drawer: details, every action for the room's state and role, recent changes ----
+  const kv = (k, v) => (v ? h("div", { class: "kv" }, h("dt", null, k), h("dd", null, v)) : null);
+  const history = (r) => {
+    const rows = hist[r.id];
+    if (!rows) { hist[r.id] = "wait"; api(`/api/rooms/${r.id}/history`).then((x) => { hist[r.id] = x; }, () => { hist[r.id] = []; }).then(() => { if (RM.sel === r.id && out.isConnected) keepFocus(fillDrawer); }); }
+    return !Array.isArray(rows) ? h("p", { class: "small muted" }, "Loading…") : rows.length ? h("ul", { class: "plain notes small" }, rows.map((x) => h("li", null, h("strong", null, RM_ACT[x.action] || x.action), ` · ${x.username || "system"} · ${fmtWhen(x.ts)}`)))
+      : h("p", { class: "small muted" }, "No status change is recorded for this room.");
+  };
+  const fillDrawer = () => {
+    const r = RM.sel && rooms().find((x) => x.id === RM.sel);
+    if (!r) { RM.sel = null; if (drawer.open) drawer.close(); return; }
+    const a = asg(r), who = person(a.hk), pr = hkPriority(r), clean = can("clean") && today() && !r.wait, dirty = r.state === "to_clean" || r.state === "cleaning", event = dirty || r.state === "blocked";
+    const b = (label, fn, cls = "secondary") => h("button", { class: "btn small " + cls, type: "button", "data-fk": "d" + label, onclick: fn }, label);
+    const actions = r.wait ? [] : [
+      r.state === "available" && can("book") && d.date >= d.today ? b("Book", () => openBook(r), "") : null,
+      r.state === "to_clean" && clean ? b("Start cleaning", () => startRoom(r), "") : null,
+      dirty && clean ? b("Mark ready", () => readyRooms([r]), r.state === "cleaning" ? "" : "secondary") : null,
+      r.state === "available" && clean && a.cleanedAt && !a.inspected ? b("Mark inspected", () => { hkEvent(r, "i", d.rooms); toast(`Room ${r.number}: inspected.`); draw(); }) : null,
+      !event && clean ? b("Mark needs cleaning", () => dirtyRooms([r])) : null,
+      (r.state === "booked" || r.state === "checked_in") && r.booking_id && allowed("bookings") ? b("Open the booking", () => openBooking(r), "") : null,
+      r.state === "blocked" && can("status") ? [b("Edit", () => editBlock(r)), b("Clear status", () => clearRoom(r))] : null,
+      (dirty || r.state === "available") && can("status") ? b("Block room", () => blockRoom(r)) : null,
+      clean && (dirty || r.state === "available") ? b(a.note ? "Edit note" : "Add note", () => noteDialog(r)) : null].flat().filter(Boolean);
+    drawer.replaceChildren(h("div", { class: "detail" },
+      h("div", { class: "head" }, h("h2", { id: "hk_dh", tabindex: "-1", "data-fk": "dh" }, "Room " + r.number), h("button", { class: "btn small secondary", type: "button", "data-fk": "dclose", onclick: () => closeDrawer() }, "Close")),
+      h("p", { class: "small muted" }, `${r.type} · sleeps ${r.capacity} · ${hkFloor(r)} · ${r.property}`),
+      h("div", { class: "rm-badges" }, badge(tone(r), word(r)), pr ? badge(pr[0], pr[1]) : null),
+      h("p", { class: "hint" }, r.wait ? "This change is sent in a few seconds. Choose Undo in the message at the bottom to take it back." : RM_HELP[r.state]),
+      h("dl", { class: "kvs" }, kv("Guest", r.guest ? `${r.guest} · ${fmtDate(r.check_in)} to ${fmtDate(r.check_out)}` : null), kv("Arriving today", r.arrival && r.state !== "booked" ? r.arrival.guest + (r.arrival.time ? " at " + r.arrival.time : "") : null),
+        kv("Expected at", r.arrival && r.state === "booked" ? r.arrival.time : null), kv("Reason", event ? r.reason : null), kv("Category", r.category), kv("Since", event ? fmtDate(r.since) : null),
+        kv("Until", r.state === "blocked" ? (r.until ? fmtDate(r.until) : "Until cleared") : null), kv(dirty ? "Assigned to" : "Cleaned by", who && (dirty || a.cleanedAt) ? who.name : dirty && can("clean") ? "Nobody yet" : null),
+        kv("Housekeeping", r.state === "available" && a.cleanedAt ? (a.inspected ? "Cleaned and inspected" : "Cleaned, not inspected yet") : null), kv("Ready since", r.ready_since ? fmtWhen(r.ready_since) : null), kv("Note", a.note)),
+      dirty && clean ? h("div", null, h("label", { for: "rm_as" }, r.state === "cleaning" ? "Reassign to" : "Assign to"),
+        h("select", { id: "rm_as", "data-fk": "das", onchange: (e) => assignTo([r], e.target.value) }, hkOptions(a.hk).map(([v, l]) => opt(v, l, a.hk || "")))) : null,
+      actions.length ? h("div", { class: "rm-actions" }, actions) : r.wait ? null : h("p", { class: "small muted" }, today() || event ? "Your role has no action for this room." : "Cleaning actions are for today only."),
+      h("section", { "aria-label": "Recent changes" }, h("h3", null, "Recent changes"), history(r))));
+  };
+  const openDrawer = (id) => { RM.sel = id; draw(); if (!drawer.open) drawer.show(); const hd = $("#hk_dh", drawer); if (hd) hd.focus(); };
+  const closeDrawer = () => { const id = RM.sel; RM.sel = null; drawer.close(); draw(); const el = root.querySelector(`[data-fk="o${id}"]`); if (el) el.focus(); };
+
+  // ---- toolbar ----
+  const searchEl = h("input", { id: "rm_q", type: "search", value: RM.q, maxlength: 60, placeholder: "Room number or guest", autocomplete: "off", oninput: (e) => { RM.q = e.target.value; filtered(); } });
+  const whoEl = can("clean") ? h("select", { id: "rm_who", onchange: (e) => { RM.who = e.target.value; filtered(); } }) : null, floorEl = h("select", { id: "rm_fl", onchange: (e) => { RM.floor = e.target.value; filtered(); } });
+  const fillSelects = () => {
+    if (RM.who && RM.who !== "none" && !person(RM.who)) RM.who = "";
+    if (whoEl) whoEl.replaceChildren(opt("", "All housekeepers", RM.who), opt("none", "Unassigned", RM.who), HK.people.map((p) => opt(p.id, p.name, RM.who)));
+    const floors = [...new Set(d.rooms.map((r) => String(r.floor)))];
+    if (!floors.includes(RM.floor)) RM.floor = "";
+    floorEl.replaceChildren(opt("", "All floors", RM.floor), floors.map((f) => opt(f, hkFloor(d.rooms.find((r) => String(r.floor) === f)), RM.floor)));
+  };
+  const viewBtns = h("div", { class: "rm-seg", role: "group", "aria-label": "Show rooms as" }, [["tiles", "Tiles"], ["list", "List"]].map(([v, l]) =>
+    h("button", { class: "btn secondary", type: "button", "data-v": v, "data-fk": "v" + v, onclick: () => { RM.view = v; try { sessionStorage.setItem("rooms_view", v); } catch {} draw(); } }, l)));
+  const pickBtn = can("clean") ? h("button", { class: "btn secondary", type: "button", "data-fk": "pick", onclick: () => { RM.pick = RM.pick ? null : new Set(); draw(); say(RM.pick ? "Select rooms, then choose an action for them." : "Selection closed."); } }, "Select rooms") : null;
+  root.replaceChildren(h("div", { class: "head" }, h("h1", null, "Rooms"), h("div", { class: "toolbar" }, h("button", { class: "btn secondary", type: "button", onclick: reload }, "Refresh"),
+      can("status") ? h("button", { class: "btn", type: "button", onclick: openStatus }, "Block a room or report an issue") : null)),
+    h("p", { class: "hint" }, "Every room and its state for the chosen day. Choose a count to filter, then select a room for its details and actions. Press / to search and Esc to close a room."),
+    h("div", { class: "toolbar rm-tools", role: "search", "aria-label": "Filter rooms" }, propSelect(reload),
+      h("div", null, h("label", { for: "rm_date" }, "Date"), h("input", { id: "rm_date", type: "date", value: S.date, onchange: (e) => { S.date = e.target.value || S.meta.today; e.target.value = S.date; reload(); } })),
+      h("div", { class: "grow" }, h("label", { for: "rm_q" }, "Search"), searchEl), whoEl ? h("div", null, h("label", { for: "rm_who" }, "Housekeeper"), whoEl) : null,
+      h("div", null, h("label", { for: "rm_fl" }, "Floor"), floorEl), viewBtns, pickBtn), out, live, drawer);
+  RM.draw = draw;
+  RM.keys = (e) => {
+    if (!out.isConnected || e.defaultPrevented || document.querySelector("dialog:modal")) return;
+    if (e.key === "Escape") { if (drawer.open) { e.preventDefault(); closeDrawer(); } else if (RM.pick) { RM.pick = null; draw(); } }
+    else if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.target.closest("input, textarea, select")) { e.preventDefault(); searchEl.focus(); searchEl.select(); }
+  };
+  await load();
+  if (RM.sel) drawer.show();
+  window.scrollTo(0, RM.y); requestAnimationFrame(() => { RM.live = out.isConnected; });
+  RM.tick = setInterval(() => {  // stays out of the way of an open form, and stops by itself once the page is left
+    if (!out.isConnected) { clearInterval(RM.tick); return; }
+    if (!document.hidden && !document.querySelector("dialog:modal")) load(true).catch(() => {});
+  }, 60000);
 }
 
 // ---------- calendar: bookings and blocked rooms by day ----------
@@ -700,24 +1331,6 @@ async function messagesView(root) {
       sel("m_ev", "Message", "msgEvent", [["", "All"], ["confirmed", "Confirmation"], ["changed", "Change"], ["cancelled", "Cancellation"], ["reminder", "Reminder"]]),
       h("div", null, h("label", { for: "m_bk" }, "Booking ID"), h("input", { id: "m_bk", inputmode: "numeric", maxlength: 12, value: S.msgBooking || "", onchange: (e) => { S.msgBooking = e.target.value.trim(); reload(); } }))), out);
   await load();
-}
-
-async function statusView(root) {
-  const ev = await api("/api/room_events?" + qs({ property_id: S.prop }));
-  const clear = (e, verb, done, path) => h("button", { class: "btn small secondary", type: "button", "aria-label": `${verb} room ${e.room}`, onclick: async () => {
-    try { await api(`/api/room_events/${e.id}/${path}`, {}); toast(`Room ${e.room}: ${done}`); route(); } catch (x) { toast(x.message); } } }, verb);
-  const cleaning = (e) => e.kind === "cleaning_required" || e.kind === "in_cleaning";
-  const table = ev.length ? h("div", { class: "scroll", role: "region", "aria-label": "Rooms not available", tabindex: "0" }, h("table", null, h("caption", null, `Rooms with a status (${ev.length})`),
-    h("thead", null, h("tr", null, ["Room", "Status", "Category", "Reason", "Since", "Until", "Actions"].map((t) => h("th", { scope: "col" }, t)))),
-    h("tbody", null, ev.map((e) => h("tr", null, h("td", null, e.room, h("div", { class: "small muted" }, e.property)),
-      h("td", null, badge(e.kind === "internal_block" ? "blocked" : cleaning(e) ? "cleaning" : e.kind, KIND_LABEL[e.kind])), h("td", null, e.issue_category || ""), h("td", null, e.reason || ""),
-      h("td", null, fmtDate(e.start_date)), h("td", null, e.end_date ? fmtDate(e.end_date) : "Until cleared"),
-      h("td", { class: "actions" }, [
-        e.kind === "cleaning_required" && can("clean") ? clear(e, "Start cleaning", "cleaning started.", "start_cleaning") : null,
-        cleaning(e) && can("clean") ? clear(e, "Mark clean", "ready for guests.", "release") : null,
-        !cleaning(e) && can("status") ? clear(e, "Clear status", "available again.", "release") : null])))))) : h("p", { class: "empty card" }, "Every room is available for use. Nothing is blocked, under maintenance or waiting for cleaning.");
-  root.replaceChildren(h("div", { class: "head" }, h("h1", null, "Room status"), h("div", { class: "toolbar" }, propSelect(route),
-    can("status") ? h("button", { class: "btn", type: "button", onclick: openStatus }, "Block a room or report an issue") : null)), table);
 }
 
 async function auditView(root) {
@@ -1049,6 +1662,38 @@ $("#cform").addEventListener("submit", async (e) => {
   finally { btn.disabled = false; }
 });
 
+// the shape of every small form dialog: close button, validity check, one POST, a toast, then the page reloads its data. `done` is a text or a function that makes it.
+function wireDialog(prefix, dlg, form, run, done) {
+  $(`#${prefix}_back`).onclick = () => dlg.close();
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault(); const btn = $(`#${prefix}_submit`), err = $(`#${prefix}_err`); err.hidden = true;
+    if (!form.reportValidity()) return;
+    btn.disabled = true;
+    try { await run(); dlg.close(); toast(typeof done === "function" ? done() : done); route(); }
+    catch (x) { err.textContent = x.message; err.hidden = false; err.scrollIntoView({ block: "nearest" }); }
+    finally { btn.disabled = false; }
+  });
+}
+let eb = null, rb = null;
+function openEdit(b) {
+  eb = b; $("#e_err").hidden = true;
+  $("#e_intro").textContent = t("staff.edit.intro", { id: b.id, room: b.room, from: fmtDate(b.check_in), to: fmtDate(b.check_out) });
+  $("#e_name").value = b.guest_name; $("#e_phone").value = b.phone; $("#e_guests").value = b.guests; $("#e_remarks").value = b.remarks || "";
+  $("#edlg").showModal();
+}
+wireDialog("e", $("#edlg"), $("#eform"), () => api(`/api/bookings/${eb.id}/edit`, Object.fromEntries(new FormData($("#eform")))), () => t("staff.res.toast.updated", { id: eb.id }));
+
+function openResched(b) {
+  rb = b; $("#r_err").hidden = true;
+  $("#r_intro").textContent = t("staff.resched.intro", { id: b.id, guest: b.guest_name, room: b.room, from: fmtDate(b.check_in), to: fmtDate(b.check_out) });
+  $("#r_in").min = S.meta.today; $("#r_in").value = b.check_in < S.meta.today ? S.meta.today : b.check_in; $("#r_out").value = b.check_out; $("#r_out").min = addDay($("#r_in").value, 1);
+  $("#r_room").disabled = !!b.group_id;
+  fillRooms({ value: b.property_id }, $("#r_room"), $("#r_in").value, b.room_id);
+  $("#rdlg").showModal();
+}
+$("#r_in").addEventListener("change", () => { const a = $("#r_in").value; if (!a) return; $("#r_out").min = addDay(a, 1); if ($("#r_out").value <= a) $("#r_out").value = addDay(a, 1); fillRooms({ value: rb.property_id }, $("#r_room"), a, $("#r_room").value); });
+wireDialog("r", $("#rdlg"), $("#rform"), () => api(`/api/bookings/${rb.id}/reschedule`, { check_in: $("#r_in").value, check_out: $("#r_out").value, room_id: rb.group_id ? rb.room_id : $("#r_room").value }), () => t("staff.res.toast.rescheduled", { id: rb.id }));
+
 function syncKind() {
   const k = $("#k_kind").value, block = k === "internal_block";
   $("#k_cat_box").hidden = block; $("#k_cat").required = !block;
@@ -1076,7 +1721,8 @@ $("#kform").addEventListener("submit", async (e) => {
   finally { btn.disabled = false; }
 });
 
-route();
+// the staff app is English only: load the shared texts file, then force English whatever language the browser prefers
+I18N.init().then(() => I18N.setLang("en")).catch(() => {}).finally(route);
 </script>
 </body>
 </html>

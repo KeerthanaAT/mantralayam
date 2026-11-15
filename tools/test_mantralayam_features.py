@@ -875,6 +875,90 @@ def test_sms_text_uses_locales():
     assert m.tr("en", "no.such.key") == "no.such.key"
 
 
+def test_staff_dashboard_sees_guest_site():
+    """The staff dashboard reads the same bookings, holds and payments as the guest site: a 2-room online booking counts once as a website source and
+    takes two rooms from the availability; an unexpired hold counts as occupied; a staff POST is behind the CSRF token; the staff-form columns migrate twice without loss."""
+    c = db()
+    h, salt = st_app.make_hash("Pw#12345")
+    c.execute("UPDATE users SET pw_hash = ?, salt = ?", (h, salt))
+    c.close()
+    tok = {}
+    for u in ("admin", "manager"):
+        s, out, tok[u] = st_app.dispatch("POST", "/api/login", None, {"username": u, "password": "Pw#12345"}, IP)
+        assert s == 200, (u, out)
+        if u == "admin":
+            csrf = out["csrf"]
+    def dash(u, **q):
+        s, o, _ = st_app.dispatch("GET", "/api/staff/dashboard", q, None, IP, tok[u], None, check_csrf=True)
+        assert s == 200, (s, o)
+        return o
+    base = req(rooms=2, guests=2)
+    pid, rng = base["property_id"], {"property_id": base["property_id"], "from": base["check_in"], "to": base["check_out"]}
+    before = dash("admin", **rng)
+    s, bk = call("POST", "/api/public/book", base | dict(guest_name="Test Guest", phone=phone(), id_type="Aadhaar", id_number="1234", payment_method="pay_at_counter"))
+    assert s == 200, bk
+    after = dash("admin", **rng)
+    web = lambda o: next((x["count"] for x in o["sources"]["items"] if x["source"] == "website"), 0)
+    assert web(after) == web(before) + 1, "a two-room booking is one source entry"
+    assert after["availability"]["available"] == before["availability"]["available"] - 2 and after["availability"]["occupied"] == before["availability"]["occupied"] + 2
+    assert after["month"]["outstanding_bookings"] == before["month"]["outstanding_bookings"] + (1 if base["check_in"][:7] == D(0)[:7] else 0)  # dues are by check-in month
+    # an unexpired hold takes the room from the staff view too, an expired one does not
+    free = next(r for r in after["availability"]["rooms"] if r["state"] == "available")
+    c = db()
+    c.execute("INSERT INTO holds (token, room_id, check_in, check_out, expires_at, ip) VALUES ('t-live', ?, ?, ?, ?, '1.1.1.1')", (free["id"], base["check_in"], base["check_out"], (m.now() + timedelta(minutes=5)).isoformat(timespec="seconds")))
+    held = next(r for r in dash("admin", **rng)["availability"]["rooms"] if r["id"] == free["id"])
+    assert held["state"] == "occupied" and held["detail"] == "held", held
+    c.execute("UPDATE holds SET expires_at = ? WHERE token = 't-live'", ((m.now() - timedelta(minutes=1)).isoformat(timespec="seconds"),))
+    assert next(r for r in dash("admin", **rng)["availability"]["rooms"] if r["id"] == free["id"])["state"] == "available"
+    # staff POSTs need the session's CSRF token
+    post = lambda t, tk: st_app.dispatch("POST", "/api/me/profile", None, {"full_name": "Admin"}, IP, tok["admin"], tk, check_csrf=True)[0]
+    assert post("admin", None) == 403 and post("admin", "wrong") == 403 and post("admin", csrf) == 200
+    assert st_app.dispatch("POST", "/api/me/profile", None, {"full_name": "Manager"}, IP, tok["manager"], None, check_csrf=True)[0] == 403
+    # migration: the three staff-form columns exist, are NULL on old rows, and a second run keeps everything
+    n = c.execute("SELECT COUNT(*) FROM bookings").fetchone()[0]
+    for _ in range(2):
+        m.migrate(c)
+    cols = {r[1] for r in c.execute("PRAGMA table_info(bookings)")}
+    assert {"vehicle_number", "guest_address", "staff_notes"} <= cols and c.execute("SELECT COUNT(*) FROM bookings").fetchone()[0] == n
+    assert c.execute("SELECT COUNT(*) FROM bookings WHERE vehicle_number IS NOT NULL OR guest_address IS NOT NULL OR staff_notes IS NOT NULL").fetchone()[0] == 0
+    c.close()
+
+def test_staff_reservations_see_guest_bookings():
+    """A guest-site booking of two rooms shows in the staff Reservations list as two Confirmed rows with the guest's name, counts them under the right tab, sorts by booking date,
+    and is in the CSV export; cancelling it moves it to the Cancelled tab. Both response shapes work."""
+    c = db()
+    h, salt = st_app.make_hash("Pw#12345")
+    c.execute("UPDATE users SET pw_hash = ?, salt = ?", (h, salt))
+    c.close()
+    s, out, tok = st_app.dispatch("POST", "/api/login", None, {"username": "admin", "password": "Pw#12345"}, IP)
+    assert s == 200, out
+
+    def staff(path, **q):
+        s, o, _ = st_app.dispatch("GET", path, q, None, IP, tok, None, check_csrf=True)
+        return s, o
+    base = req(rooms=2, guests=2)
+    name = "ZZGuestRes Devotee"
+    s, bk = call("POST", "/api/public/book", base | dict(guest_name=name, phone=phone(), id_type="Aadhaar", id_number="1234", payment_method="pay_at_counter"))
+    assert s == 200, bk
+    s, o = staff("/api/bookings", q="ZZGuestRes", page_size=20)
+    assert s == 200 and o["total"] == 2 and o["counts"] == {"all": 2, "checked_in": 0, "checked_out": 0, "confirmed": 2, "cancelled": 0, "no_show": 0}, o["counts"]
+    assert {b["guest_name"] for b in o["items"]} == {name} and {b["status"] for b in o["items"]} == {"Confirmed"} and {b["source"] for b in o["items"]} == {"online"}
+    assert all(b["room_type"] and b["nights"] == 2 and b["property"] for b in o["items"])
+    s, newest = staff("/api/bookings", sort="booked_desc", page_size=1)
+    assert s == 200 and newest["items"][0]["created_at"] == max(r["created_at"] for r in staff("/api/bookings", page_size=100, sort="booked_desc")[1]["items"])
+    assert isinstance(staff("/api/bookings", q="ZZGuestRes")[1], list) and len(staff("/api/bookings", q="ZZGuestRes")[1]) == 2, "the plain list still works"
+    s, out = staff("/api/bookings/csv", q="ZZGuestRes")
+    text = out["_bytes"].decode("utf-8-sig").splitlines()
+    assert s == 200 and len(text) == 3 and all(name in line for line in text[1:])
+    first = o["items"][0]["id"]
+    s, cancelled, _ = st_app.dispatch("POST", f"/api/bookings/{first}/cancel", None, {"reason": "Guest asked"}, IP, tok, None)
+    assert s == 200, cancelled
+    s, o = staff("/api/bookings", q="ZZGuestRes", status="Cancelled", page_size=20)
+    assert o["total"] == 1 and o["counts"]["confirmed"] == 1 and o["counts"]["cancelled"] == 1 and o["counts"]["all"] == 2
+    assert staff("/api/bookings", q="ZZGuestRes", sort="x; DROP TABLE bookings", page_size=20)[0] == 400
+    assert db().execute("SELECT COUNT(*) FROM bookings").fetchone()[0] > 0
+
+
 if __name__ == "__main__":
     try:
         setup()

@@ -22,6 +22,7 @@ python tools/test_mantralayam_features.py   # production hardening, booking flow
 python tools/test_i18n.py
 python tools/test_pay_notify.py            # notifications, PDF/QR, payments, refunds (mock provider)
 python tools/test_staff_desk.py            # roles, QR check-in, ID vault, housekeeping, blocked rooms, call-backs
+# the Rooms page (state per room, block edit, room history, menu) is covered by test_rooms_page in test_mantralayam_staff.py
 python tools/test_reports.py               # reports, CSV and Google Sheets export, analytics
 python tools/test_audit_fixes.py           # regression tests for the audit's findings
 python tools/audit_run.py                  # live audit: real servers, browser, writes TEST_REPORT_LIVE.md (see TEST_REPORT.md)
@@ -34,12 +35,13 @@ The tests run on a copy of `.tmp/mantralayam.db`. Optional settings are listed i
 ## Where things are
 - `CLAUDE.md`: architecture summary and the standing project rules.
 - `workflows/`: API, rules and edge cases for the guest and staff apps.
+- Staff app pages: Dashboard (today, month, charts, availability) and Reservations (tabs, search, sort, paging, CSV export) are in `web/staff.html`; their API is `GET /api/staff/dashboard` and `GET /api/bookings` in `tools/mantralayam_staff.py`. The staff app reads its texts from `web/locales/en.json` (`staff.*` keys).
 - `web/locales/`: guest-page translations (English is the source; `TODO` means not translated yet).
 - Admin > Site info (staff app, super admin): the facts shown to guests, such as timings and policies.
 - `docs/DEPLOYMENT.md`: put it on a VPS with HTTPS on a real domain (DNS steps, Caddy or nginx, systemd, uptime monitor). The config files are in `deploy/`.
 - `tools/providers.py`: SMS, email and CAPTCHA providers, each with a mock mode (SMS codes are printed to the console in development).
 
-Notifications and payments (see `workflows/mantralayam_rooms.md`): booking confirmations, changes, cancellations and arrival reminders go by SMS, WhatsApp (when configured) and email with a QR code and a PDF; every send is logged (Staff > Messages, no message text kept). Online payment (full, advance or counter) runs through Razorpay, or the local mock; refunds follow the refund percentage in Admin > Settings. Staff get a Front desk screen (scan the QR, record the ID, take payment, check in), a Housekeeping board, a Calendar with blocked rooms, Payments (reconciliation, refunds) and call-back follow-up notes.
+Notifications and payments (see `workflows/mantralayam_rooms.md`): booking confirmations, changes, cancellations and arrival reminders go by SMS, WhatsApp (when configured) and email with a QR code and a PDF; every send is logged (Staff > Messages, no message text kept). Online payment (full, advance or counter) runs through Razorpay, or the local mock; refunds follow the refund percentage in Admin > Settings. Staff get a Front desk screen (scan the QR, record the ID, take payment, check in), a Housekeeping tab (board, housekeeper list with stats, room assignment; team data is kept in the browser), a Calendar with blocked rooms, Payments (reconciliation, refunds) and call-back follow-up notes.
 
 Reports and analytics: Staff > Reports (managers) has daily arrivals, departures and sevas, occupancy, revenue and payment reconciliation, and first-party analytics (searches, booking funnel, sold-out dates; counters only, nothing identifies a visitor). Every table downloads as CSV or goes to Google Sheets through a service account (env vars, see `.env.example`); without them the CSV downloads instead.
 

@@ -65,7 +65,7 @@ def test_locales_match_english():
 
 def test_markup_keys_exist():
     en = load("en")
-    html = (ROOT / "web" / "guest.html").read_text(encoding="utf-8")
+    html = "\n".join((ROOT / "web" / f).read_text(encoding="utf-8") for f in ("guest.html", "staff.html"))  # the staff app reads the same texts file (English only)
     used = set(re.findall(r'data-i18n="([\w.]+)"', html)) | set(re.findall(r'data-i18n-attr="[^"]*?:([\w.]+)', html)) | set(re.findall(r'\bt\("([\w.]*\w)"', html))
     missing = {k for k in used if not k.endswith("_") and k not in en and k + "_other" not in en}  # a name ending in _ is built at run time  # a plural base key is present when key_other exists
     assert used and not missing, sorted(missing)

@@ -1,5 +1,45 @@
 # Changelog
 
+## 2026-11-15 (one Rooms page, staff app only)
+The guest site and every booking rule are unchanged.
+- **Rooms, Room status and the room board in Housekeeping are now one page, Rooms**, in the menu for every role. `#/status` and old bookmarks open it (`MOVED` in `staff.html`); the "Room status" menu entry is gone (`PAGES`). No existing route or role check changed.
+- **One state per room** from the new `GET /api/rooms/board?property_id=&date=` (all roles, own properties): Available, Booked, Checked in, To clean, Being cleaned, Blocked (maintenance and out of service show their own word). A block hides cleaning, cleaning hides the guest, so a room never shows two labels. Cleaning states describe today only; another date shows Available, Booked, Checked in and Blocked.
+- **Layout**: count cards that filter (default "Needs attention": to clean, blocked, urgent arrivals), toolbar (property, date, search, housekeeper, floor, Block a room), tiles grouped by building and floor in folding groups with a fixed-height scroll area, urgent rooms pinned on top, and a List view (remembered for the session).
+- **Drawer** (a bottom sheet on a phone) holds the details and every action for the room's state and role: Book, Block room, Mark needs cleaning, Assign, Start cleaning, Mark ready, Reassign, Mark inspected, Add note, Edit, Clear status, Open the booking. The last few changes (who and when) are listed.
+- **Bulk actions** (Select rooms): Assign to, Mark needs cleaning, Mark ready. **Undo**: Clear status, Mark ready and Needs cleaning reach the server about 5 seconds later, so Undo sends nothing; the change is sent at once if you leave the page. Keys: `/` search, `Esc` closes the drawer or the selection. Changes are announced to screen readers. The page refreshes every 60 seconds and keeps filters, open groups, scroll and the open room.
+- **Housekeeping** keeps the team panel (housekeepers, stats, attendance, CSV) and a link "Open rooms to assign". Stats still count when a room is marked ready on the Rooms page.
+- **New routes**: `POST /api/room_events/<id>/edit` (front desk and managers; same checks as a new block, audit `room.block_edit`) and `GET /api/rooms/<id>/history` (every role; only `room.*` entries, only user, action and time).
+- **Fix**: "Mark needs cleaning" no longer refuses a room whose old block has already ended.
+- Housekeeper records, assignments and notes are still kept in the browser (localStorage), so the housekeeper filter and "assigned to" differ between devices. Moving them to the database is a separate task.
+- Tests: `test_rooms_page` in `test_mantralayam_staff.py` (state rule, roles, scope, edit, history, menu and the redirect text).
+
+## 2026-11-14 (Housekeeping tab, staff app only)
+The guest site and every booking rule are unchanged.
+- **Housekeeping is back in the menu** (front desk, managers, super admin and housekeeping roles; `PAGES` in the staff module).
+- **Team panel**: add, edit, delete (with confirmation) housekeepers with phone, shift, floor or block and status (Available / Busy / On Leave); search and status filter; per-person stats (cleaned today, this week, this month, pending, average minutes per room, attendance, rating, remarks, recent activity, 7-day chart); Mark attendance; CSV export; summary cards.
+- **Room cards** show the task (Dirty, Cleaning in progress, Cleaned, Inspected), an urgent tag when the next check-in is within 2 hours, an assignee picker, Mark inspected and a note. Start cleaning and Mark ready also record the work for the assigned person. Check-out already flags a room as needing cleaning on the server.
+- **Rooms section is now compact**: the five count cards are tabs (plus All; default To clean, gold border on the open one), rooms are small tiles (number, status dot, guest or housekeeper) grouped by building and floor in folding groups inside a scrolling area, with a room/guest search and a housekeeper filter. Ready and Occupied start folded. Selecting a tile opens a side drawer with the full card (assign, start, mark ready, inspect, note, needs cleaning, clear block, new Block room button). Tiles carry one quick action (Assign, Start, Ready) and a red mark when check-in is within 2 hours.
+- Housekeeper records, assignments and history are stored in the browser's localStorage (`mantralayam.housekeeping.v1`), so they are per browser, not shared between devices. The first five housekeepers are sample data.
+
+## 2026-11-10 (staff dashboard and Reservations)
+Staff app only. The guest site and every booking rule are unchanged.
+
+**Changed behaviour you will notice**
+- **Dashboard** is rebuilt: Today cards (arrivals, departures, occupancy tonight, cash collected today), This-month cards for managers and super admin (net revenue, expenses, profit, outstanding dues; expenses and profit show 0 until an Expenses page exists), a 30-day revenue chart (plain SVG with a table view), booking sources, and room availability for a night or a date range. Money figures are for managers and super admin only; the server leaves them out for other roles.
+- **Bookings is now Reservations**: status tabs with live counts (Checked In, Checked Out, All, Confirmed, Cancelled; No-show only under All), search, a check-in date filter, a Sort menu (kept for the browser session), 20 rows per page, and a detail view with check-in, check-out, no-show, edit, reschedule and cancel. On a phone each booking is a card.
+- The menu no longer lists Front desk, Call-backs, Housekeeping, Payments, Messages, Notices, Feedback or Broadcasts (the pages and their routes still exist).
+
+**Added**
+- `GET /api/staff/dashboard`. `GET /api/bookings` takes `status`, `from`/`to`, `sort`, `page`, `page_size`, `counts`; with `page`, `page_size` or `counts` it returns `{items, total, page, page_size, pages, sort, counts}`, otherwise the old plain list. Sort values are a fixed whitelist; an unknown one is refused (400).
+- `GET /api/bookings/csv`: the filtered list as CSV, audited as `booking.export`. New permission `booking.export` (managers and front desk; see Admin > Roles).
+- The staff server serves `/i18n.js` and `/locales/en.json` (English only); new staff texts are `staff.*` keys in `web/locales/en.json`.
+
+**Fixed**
+- Availability for today now counts a room as occupied while a guest is still checked in past their check-out date.
+- The dashboard's recent-bookings query filtered on `No-show`; the stored value is `No-Show`.
+
+**Needs your action**: restart the staff server. `migrate()` now adds three empty text columns to `bookings` (`vehicle_number`, `guest_address`, `staff_notes`); no screen uses them yet. Translate the new `staff.*` texts only if the staff app will ever be shown in another language.
+
 ## 2026-11-04 (security audit fixes)
 Fixes for the November 2026 security audit (findings F1 to F22; notes, limits and the incident runbook are in `docs/SECURITY.md`; tests in `tools/test_security.py`).
 

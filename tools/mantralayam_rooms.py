@@ -143,6 +143,10 @@ def migrate(conn):
     for col in ("arrival_time", "darshan_date"):  # optional arrival details, added without touching existing rows
         if col not in have:
             conn.execute(f"ALTER TABLE bookings ADD COLUMN {col} TEXT")
+    have = {r[1] for r in conn.execute("PRAGMA table_info(bookings)")}
+    for col in ("vehicle_number", "guest_address", "staff_notes"):  # staff reservation form; nullable, existing rows stay NULL
+        if col not in have:
+            conn.execute(f"ALTER TABLE bookings ADD COLUMN {col} TEXT")
     conn.execute("CREATE TABLE IF NOT EXISTS holds (id INTEGER PRIMARY KEY, token TEXT NOT NULL, room_id INTEGER NOT NULL REFERENCES rooms(id), "
                  "check_in TEXT NOT NULL, check_out TEXT NOT NULL, expires_at TEXT NOT NULL, ip TEXT)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_holds_room ON holds(room_id, expires_at)")
