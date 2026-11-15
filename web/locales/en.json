@@ -725,7 +725,7 @@
   "staff.res.beds_one": "{count} extra bed",
   "staff.res.beds_other": "{count} extra beds",
   "staff.res.detail.title": "Booking #{id}",
-  "staff.res.detail.close": "Close",
+  "staff.res.detail.close_aria": "Close booking",
   "staff.res.detail.mobile": "Mobile",
   "staff.res.detail.room": "Room",
   "staff.res.detail.property": "Property",

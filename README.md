@@ -35,7 +35,7 @@ The tests run on a copy of `.tmp/mantralayam.db`. Optional settings are listed i
 ## Where things are
 - `CLAUDE.md`: architecture summary and the standing project rules.
 - `workflows/`: API, rules and edge cases for the guest and staff apps.
-- Staff app pages: Dashboard (today, month, charts, availability) and Reservations (tabs, search, sort, paging, CSV export) are in `web/staff.html`; their API is `GET /api/staff/dashboard` and `GET /api/bookings` in `tools/mantralayam_staff.py`. The staff app reads its texts from `web/locales/en.json` (`staff.*` keys).
+- Staff app pages: Dashboard (today, month, charts, availability) and Reservations (tabs, search, sort, paging, CSV export) are in `web/staff.html`; their API is `GET /api/staff/dashboard` and `GET /api/bookings` in `tools/mantralayam_staff.py`. The staff app reads its texts from `web/locales/en.json` (`staff.*` keys). The booking dialog on Reservations (`openDetail`) has a sticky header with the Close button, a self-scrolling body and a sticky action footer (primary, secondary row, Cancel); styles are `.d-head`, `.d-foot`, `.d-sec` in `web/staff.css`.
 - `web/locales/`: guest-page translations (English is the source; `TODO` means not translated yet).
 - Admin > Site info (staff app, super admin): the facts shown to guests, such as timings and policies.
 - `docs/DEPLOYMENT.md`: put it on a VPS with HTTPS on a real domain (DNS steps, Caddy or nginx, systemd, uptime monitor). The config files are in `deploy/`.

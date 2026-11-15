@@ -142,14 +142,31 @@ nav.main ul { flex-wrap: wrap; }
 .res-empty p { margin: 0; font-size: 1.05rem; color: var(--text); }
 .res-empty .actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
 .res-empty .actions:empty { display: none; }
-dialog .detail { padding: var(--s6); display: grid; gap: var(--s3); }
+/* booking detail: sticky header and footer, the body scrolls on its own */
+dialog#ddlg[open] { display: flex; flex-direction: column; overflow: hidden; max-height: calc(100dvh - 2rem); }
+dialog .detail { padding: var(--s6); display: grid; gap: var(--s3); }  /* also the Rooms drawer */
 dialog .detail h2 { margin: 0; }
+dialog form .foot { position: sticky; bottom: 0; z-index: 1; margin-inline: calc(-1 * var(--s2)); padding: var(--s3) var(--s2); background: var(--solid); border-top: 1px solid var(--border); }  /* long forms: Save stays in view */
+dialog#ddlg .detail { display: flex; flex-direction: column; min-height: 0; flex: 1; padding: 0; gap: 0; }
+.d-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s3); padding: var(--s4) var(--s4) var(--s3) var(--s6); border-bottom: 1px solid var(--border); }
+.d-titles { display: grid; gap: var(--s2); min-width: 0; }
+.d-badges { margin: 0; display: flex; flex-wrap: wrap; gap: var(--s2); }
+.d-x { flex: none; width: 2.75rem; height: 2.75rem; display: grid; place-items: center; font-size: 1.75rem; line-height: 1; border: 2px solid var(--border); border-radius: var(--r); background: transparent; color: var(--text); cursor: pointer; }
+.d-x:hover { background: var(--tint); }
+.d-x:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.d-foot { display: grid; gap: var(--s3); padding: var(--s4) var(--s6); border-top: 1px solid var(--border); background: var(--solid); }
+.d-foot[hidden] { display: none; }
+.d-foot .btn { width: 100%; }
+.d-sec { display: grid; grid-template-columns: repeat(var(--n, 1), minmax(0, 1fr)); gap: var(--s2); }
+.d-cancel { padding-top: var(--s3); border-top: 1px dashed var(--border); }
+@media (max-width: 560px) { .d-sec { grid-template-columns: 1fr; } }
 .kvs { margin: 0; display: grid; }
 .kv { display: grid; grid-template-columns: 9rem 1fr; gap: var(--s3); padding: var(--s2) 0; border-top: 1px solid var(--border); }
 .kv dt { color: var(--text-muted); font-size: .9rem; }
 .kv dd { margin: 0; overflow-wrap: anywhere; }
-#d_body { display: grid; gap: var(--s3); }
-@media (max-width: 480px) { .kv { grid-template-columns: 1fr; gap: 0; } dialog .detail { padding: var(--s4); } }
+#d_body { display: grid; gap: var(--s3); align-content: start; padding: var(--s3) var(--s6); overflow-y: auto; flex: 1; min-height: 0; overscroll-behavior: contain; }
+.kv dd strong { font-size: 1.1rem; }
+@media (max-width: 480px) { .kv { grid-template-columns: 1fr; gap: 0; } dialog:not(#ddlg) .detail { padding: var(--s4); } .d-head { padding-left: var(--s4); } #d_body { padding: var(--s3) var(--s4); } .d-foot { padding: var(--s3) var(--s4); } }
 
 /* on a phone each booking is a card: no sideways scrolling */
 @media (max-width: 760px) {

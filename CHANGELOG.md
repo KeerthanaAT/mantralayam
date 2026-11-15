@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-15 (booking detail dialog layout, staff app only)
+Layout only: no API route, permission or business rule changed.
+- **Reservations > booking dialog** (`openDetail` in `staff.html`): the title and status badges sit in a sticky header with a 44x44 "×" Close button (`aria-label` "Close booking", new key `staff.res.detail.close_aria`; the old bottom Close and its `staff.res.detail.close` key are gone). Esc still closes, and focus returns to the row link that opened it (not after an action, which opens its own dialog).
+- **Actions in a sticky footer grid**: one full-width primary (Check in or Check out), then Edit / Reschedule / No-show in one equal-width row (columns match how many are allowed), then Cancel alone as an outlined danger button. Same status, date and role checks as before; an empty slot is not rendered, and a booking with no allowed actions shows no footer. At 560px and narrower everything stacks in one full-width column.
+- The details body scrolls on its own; the amount is bold. Keyboard order: Close, primary, secondary, Cancel.
+- **Rooms page dialogs**: the room drawer keeps its padding (it shares `.detail` with the booking dialog), and the footer of long form dialogs (such as New booking) stays pinned so Save is always in view.
+- Checked in a real browser (headless Chrome, with the real markup, CSS and `openDetail`) for Confirmed, Checked-In, Checked-Out, Cancelled and a role without `book`. `test_i18n.py` passes; `test_mantralayam_staff.py` and `test_pay_notify.py` already failed before this change (an export audit-count assertion and `purge_ids`).
+
 ## 2026-11-15 (one Rooms page, staff app only)
 The guest site and every booking rule are unchanged.
 - **Rooms, Room status and the room board in Housekeeping are now one page, Rooms**, in the menu for every role. `#/status` and old bookmarks open it (`MOVED` in `staff.html`); the "Room status" menu entry is gone (`PAGES`). No existing route or role check changed.

@@ -104,8 +104,12 @@
 
 <dialog id="ddlg" aria-labelledby="d_title">
   <div class="detail">
-    <h2 id="d_title"></h2>
+    <header class="d-head">
+      <div class="d-titles"><h2 id="d_title"></h2><p id="d_badges" class="d-badges"></p></div>
+      <button type="button" class="d-x" id="d_x">×</button>
+    </header>
     <div id="d_body"></div>
+    <footer id="d_foot" class="d-foot" hidden></footer>
   </div>
 </dialog>
 
@@ -539,25 +543,37 @@ async function reservationsView(root) {
 function openDetail(b) {
   const today = S.meta.today, dlg = $("#ddlg"), row_ = (k, v) => (v || v === 0) ? h("div", { class: "kv" }, h("dt", null, k), h("dd", null, v)) : null;
   const pay = payText(b.payment_status), src = sourceText(b.source === "front_desk" ? "walk_in" : b.source === "online" ? "website" : b.source);
-  const go = (fn) => () => { dlg.close(); fn(); };
-  const acts = [], btn = (label, cls, fn) => h("button", { class: "btn " + cls, type: "button", onclick: go(fn) }, label);
+  const opener = document.activeElement !== document.body ? document.activeElement : document.querySelector(`.rowlink[aria-label*="#${b.id}"]`) || document.querySelector(`.rowlink`);  // focus goes back to the row that opened the dialog
+  const go = (fn) => () => { dlg.close("act"); fn(); };
+  let main = null, sec = [], cancel = null;  // the one primary action, the equal-width row, and Cancel on its own
+  const btn = (label, cls, fn) => h("button", { class: "btn " + cls, type: "button", onclick: go(fn) }, label);
   if (can("book") && b.status === "Confirmed") {
-    if (b.check_in <= today && today < b.check_out) acts.push(btn(t("staff.res.act.checkin"), "", () => resAct(b, "checkin", "staff.res.toast.checked_in")));
-    if (b.check_in <= today) acts.push(btn(t("staff.res.act.noshow"), "secondary", () => resAct(b, "noshow", "staff.res.toast.no_show")));
-    acts.push(btn(t("staff.res.act.edit"), "secondary", () => openEdit(b)), btn(t("staff.res.act.resched"), "secondary", () => openResched(b)), btn(t("staff.res.act.cancel"), "danger", () => openCancel(b)));
-  } else if (can("book") && b.status === "Checked-In") acts.push(btn(t("staff.res.act.checkout"), "", () => resAct(b, "checkout", "staff.res.toast.checked_out")), btn(t("staff.res.act.edit"), "secondary", () => openEdit(b)));
+    if (b.check_in <= today && today < b.check_out) main = btn(t("staff.res.act.checkin"), "", () => resAct(b, "checkin", "staff.res.toast.checked_in"));
+    sec.push(btn(t("staff.res.act.edit"), "secondary", () => openEdit(b)), btn(t("staff.res.act.resched"), "secondary", () => openResched(b)));
+    if (b.check_in <= today) sec.push(btn(t("staff.res.act.noshow"), "secondary", () => resAct(b, "noshow", "staff.res.toast.no_show")));
+    cancel = btn(t("staff.res.act.cancel"), "danger", () => openCancel(b));
+  } else if (can("book") && b.status === "Checked-In") {
+    main = btn(t("staff.res.act.checkout"), "", () => resAct(b, "checkout", "staff.res.toast.checked_out"));
+    sec.push(btn(t("staff.res.act.edit"), "secondary", () => openEdit(b)));
+  }
+  const foot = $("#d_foot");
+  foot.replaceChildren(...[main && h("div", { class: "d-main" }, main), sec.length ? h("div", { class: "d-sec", style: `--n:${sec.length}` }, sec) : null, cancel && h("div", { class: "d-cancel" }, cancel)].filter(Boolean));
+  foot.hidden = !foot.children.length;
+  const x = $("#d_x"); x.setAttribute("aria-label", t("staff.res.detail.close_aria")); x.onclick = () => dlg.close();
+  dlg.onclose = () => { if (dlg.returnValue !== "act" && opener && opener.isConnected) opener.focus(); dlg.returnValue = ""; };
   $("#d_title").textContent = t("staff.res.detail.title", { id: b.id });
-  $("#d_body").replaceChildren(h("p", null, badge(STATUS_CLASS[b.status] || "neutral", resStatusText(b.status)), " ", badge(PAY_CLASS[b.payment_status] || "maintenance", pay)),
+  $("#d_badges").replaceChildren(badge(STATUS_CLASS[b.status] || "neutral", resStatusText(b.status)), " ", badge(PAY_CLASS[b.payment_status] || "maintenance", pay));
+  $("#d_body").scrollTop = 0;
+  $("#d_body").replaceChildren(
     h("dl", { class: "kvs" },
       row_(t("staff.res.col.guest"), b.guest_name), row_(t("staff.res.detail.mobile"), b.phone), row_(t("staff.res.detail.room"), `${b.room} · ${b.room_type}`), row_(t("staff.res.detail.property"), b.property),
       row_(t("staff.res.detail.stay"), `${fmtDate(b.check_in)} → ${fmtDate(b.check_out)} (${t("staff.res.nights", { count: b.nights })})`),
       row_(t("staff.res.col.guests"), b.guests + (b.children ? ` · ${t("staff.res.children", { count: b.children })}` : "") + (b.extra_beds ? ` · ${t("staff.res.beds", { count: b.extra_beds })}` : "")),
-      row_(t("staff.res.col.amount"), money0.format(b.amount || 0) + (b.discount_amount ? ` · ${t("staff.res.detail.discount", { amount: money0.format(b.discount_amount) })}` : "")),
+      row_(t("staff.res.col.amount"), h("span", null, h("strong", null, money0.format(b.amount || 0)), b.discount_amount ? ` · ${t("staff.res.detail.discount", { amount: money0.format(b.discount_amount) })}` : "")),
       row_(t("staff.res.detail.source"), src), row_(t("staff.res.detail.booked_on"), b.created_at ? fmtDate(b.created_at.slice(0, 10)) : ""),
       row_(t("staff.res.detail.arrival"), b.arrival_time ? t("staff.res.detail.arrives_about", { time: b.arrival_time }) : ""), row_(t("staff.res.detail.darshan"), b.darshan_date ? fmtDate(b.darshan_date) : ""),
       row_(t("staff.res.detail.booked_by"), b.booker_name), row_(t("staff.res.detail.call_on_arrival"), [b.arrival_contact_name, b.arrival_contact_phone].filter(Boolean).join(" · ")),
-      row_(t("staff.res.detail.remarks"), b.remarks), row_(t("staff.res.detail.cancel_reason"), b.cancel_reason)),
-    h("div", { class: "foot" }, h("button", { class: "btn secondary", type: "button", onclick: () => dlg.close() }, t("staff.res.detail.close")), acts));
+      row_(t("staff.res.detail.remarks"), b.remarks), row_(t("staff.res.detail.cancel_reason"), b.cancel_reason)));
   dlg.showModal();
 }
 async function resAct(b, action, doneKey) {
